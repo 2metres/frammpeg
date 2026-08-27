@@ -11,6 +11,7 @@ use egui::{
 };
 
 use crate::extract::{spawn_extraction, ExtractEvent};
+use crate::history::{Action, History, HistoryState, HISTORY_CAP};
 use crate::model::{
     Annotation, Moment, DEFAULT_FONT_SIZE, DEFAULT_STROKE_RGBA, DEFAULT_STROKE_WIDTH,
     DEFAULT_TEXT_RGBA, MAX_BUFFER,
@@ -64,6 +65,19 @@ struct VideoState {
     frame_pixel_size: Option<(u32, u32)>,
     last_copy_at: Option<Instant>,
     last_export_msg: Option<(Instant, String)>,
+    history: History,
+    note_edit: Option<NoteEditSnapshot>,
+    buffer_edit: Option<BufferEditSnapshot>,
+}
+
+struct NoteEditSnapshot {
+    moment_index: usize,
+    original: String,
+}
+
+struct BufferEditSnapshot {
+    moment_index: usize,
+    original: usize,
 }
 
 impl VideoState {
@@ -85,6 +99,9 @@ impl VideoState {
             frame_pixel_size: None,
             last_copy_at: None,
             last_export_msg: None,
+            history: History::new(HISTORY_CAP),
+            note_edit: None,
+            buffer_edit: None,
         }
     }
 
@@ -95,11 +112,67 @@ impl VideoState {
             if let Some(Annotation::Text { text, .. }) = ann_list.get_mut(idx) {
                 if self.text_buffer.trim().is_empty() {
                     ann_list.remove(idx);
+                    if ann_list.is_empty() {
+                        self.annotations.remove(&frame);
+                    }
                 } else {
                     *text = self.text_buffer.clone();
+                    let recorded = ann_list[idx].clone();
+                    self.history.record(Action::AnnotationCreated {
+                        frame,
+                        index: idx,
+                        annotation: recorded,
+                    });
                 }
             }
             self.text_buffer.clear();
+        }
+    }
+
+    fn after_history_change(&mut self, action: &Action) {
+        self.drag = None;
+        self.editing_text = None;
+        self.text_buffer.clear();
+        self.text_focus_pending = false;
+        if let Some(sel) = self.selected_moment {
+            if sel >= self.moments.len() {
+                self.selected_moment = None;
+            }
+        }
+        if matches!(
+            action,
+            Action::AnnotationCreated { .. } | Action::AnnotationDeleted { .. }
+        ) {
+            if let Some(frame) = action.affected_frame(&self.moments) {
+                if frame != self.current_frame && frame < self.total_frames {
+                    self.current_frame = frame;
+                }
+            }
+        }
+    }
+
+    fn finalize_pending_edits(&mut self) {
+        if let Some(snap) = self.note_edit.take() {
+            if let Some(m) = self.moments.get(snap.moment_index) {
+                if m.note != snap.original {
+                    self.history.record(Action::MomentNoteChanged {
+                        index: snap.moment_index,
+                        old: snap.original,
+                        new: m.note.clone(),
+                    });
+                }
+            }
+        }
+        if let Some(snap) = self.buffer_edit.take() {
+            if let Some(m) = self.moments.get(snap.moment_index) {
+                if m.buffer != snap.original {
+                    self.history.record(Action::MomentBufferChanged {
+                        index: snap.moment_index,
+                        old: snap.original,
+                        new: m.buffer,
+                    });
+                }
+            }
         }
     }
 
@@ -270,9 +343,13 @@ impl FrammpegApp {
                     .on_hover_text("Add the current frame to Moments")
                     .clicked()
                 {
+                    v.finalize_pending_edits();
                     let frame = v.current_frame;
                     if !v.moments.iter().any(|m| m.frame_index == frame) {
-                        v.moments.push(Moment::new(frame));
+                        let moment = Moment::new(frame);
+                        let index = v.moments.len();
+                        v.moments.push(moment.clone());
+                        v.history.record(Action::MomentCreated { index, moment });
                     }
                     v.selected_moment = v.moments.iter().position(|m| m.frame_index == frame);
                 }
@@ -409,6 +486,9 @@ impl FrammpegApp {
                 );
                 if response.clicked() {
                     jump_to = Some(frame_index);
+                    if v.selected_moment != Some(i) {
+                        v.finalize_pending_edits();
+                    }
                     v.selected_moment = Some(i);
                 }
                 if selected {
@@ -416,20 +496,68 @@ impl FrammpegApp {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("buffer +/-").small().color(theme::TEXT_MUTED));
                         let mut b = buffer;
-                        if ui
-                            .add(DragValue::new(&mut b).range(0..=MAX_BUFFER).speed(0.25))
-                            .changed()
+                        let drag_response =
+                            ui.add(DragValue::new(&mut b).range(0..=MAX_BUFFER).speed(0.25));
+                        let interaction_started =
+                            drag_response.drag_started() || drag_response.gained_focus();
+                        let interaction_ended =
+                            drag_response.drag_stopped() || drag_response.lost_focus();
+                        if interaction_started
+                            && v.buffer_edit
+                                .as_ref()
+                                .map(|s| s.moment_index != i)
+                                .unwrap_or(true)
                         {
+                            v.buffer_edit = Some(BufferEditSnapshot {
+                                moment_index: i,
+                                original: buffer,
+                            });
+                        }
+                        if drag_response.changed() {
                             v.moments[i].buffer = b;
+                        }
+                        if interaction_ended {
+                            if let Some(snap) = v.buffer_edit.take() {
+                                if snap.moment_index == i && v.moments[i].buffer != snap.original {
+                                    v.history.record(Action::MomentBufferChanged {
+                                        index: i,
+                                        old: snap.original,
+                                        new: v.moments[i].buffer,
+                                    });
+                                }
+                            }
                         }
                     });
                     ui.add_space(4.0);
                     ui.label(RichText::new("note").small().color(theme::TEXT_MUTED));
-                    ui.add(
+                    let pre_note = v.moments[i].note.clone();
+                    let note_response = ui.add(
                         TextEdit::multiline(&mut v.moments[i].note)
                             .desired_rows(3)
                             .desired_width(f32::INFINITY),
                     );
+                    if note_response.gained_focus()
+                        && v.note_edit
+                            .as_ref()
+                            .map(|s| s.moment_index != i)
+                            .unwrap_or(true)
+                    {
+                        v.note_edit = Some(NoteEditSnapshot {
+                            moment_index: i,
+                            original: pre_note,
+                        });
+                    }
+                    if note_response.lost_focus() {
+                        if let Some(snap) = v.note_edit.take() {
+                            if snap.moment_index == i && v.moments[i].note != snap.original {
+                                v.history.record(Action::MomentNoteChanged {
+                                    index: i,
+                                    old: snap.original,
+                                    new: v.moments[i].note.clone(),
+                                });
+                            }
+                        }
+                    }
                     ui.add_space(4.0);
                     if ui.button("Delete moment").clicked() {
                         delete = Some(i);
@@ -438,7 +566,12 @@ impl FrammpegApp {
                 ui.add_space(6.0);
             }
             if let Some(i) = delete {
-                v.moments.remove(i);
+                v.finalize_pending_edits();
+                let removed = v.moments.remove(i);
+                v.history.record(Action::MomentDeleted {
+                    index: i,
+                    moment: removed,
+                });
                 if v.selected_moment == Some(i) {
                     v.selected_moment = None;
                 } else if let Some(sel) = v.selected_moment {
@@ -564,17 +697,22 @@ impl FrammpegApp {
                         let w = (x1 - x0).abs();
                         let h = (y1 - y0).abs();
                         if w >= 2.0 && h >= 2.0 {
-                            v.annotations
-                                .entry(current)
-                                .or_default()
-                                .push(Annotation::Rect {
-                                    x,
-                                    y,
-                                    w,
-                                    h,
-                                    stroke_color: DEFAULT_STROKE_RGBA,
-                                    stroke_width: DEFAULT_STROKE_WIDTH,
-                                });
+                            let annotation = Annotation::Rect {
+                                x,
+                                y,
+                                w,
+                                h,
+                                stroke_color: DEFAULT_STROKE_RGBA,
+                                stroke_width: DEFAULT_STROKE_WIDTH,
+                            };
+                            let list = v.annotations.entry(current).or_default();
+                            let index = list.len();
+                            list.push(annotation.clone());
+                            v.history.record(Action::AnnotationCreated {
+                                frame: current,
+                                index,
+                                annotation,
+                            });
                         }
                     }
                 }
@@ -810,6 +948,8 @@ impl FrammpegApp {
         }
         let last = total - 1;
         let mut cur = v.current_frame;
+        let mut undo_requested = false;
+        let mut redo_requested = false;
         ctx.input(|i| {
             for e in &i.events {
                 if let Event::Key {
@@ -819,6 +959,15 @@ impl FrammpegApp {
                     ..
                 } = e
                 {
+                    if modifiers.command {
+                        match key {
+                            Key::Z if modifiers.shift => redo_requested = true,
+                            Key::Z => undo_requested = true,
+                            Key::Y if !modifiers.shift => redo_requested = true,
+                            _ => {}
+                        }
+                        continue;
+                    }
                     let big = modifiers.shift;
                     let step = if big { 10 } else { 1 };
                     match key {
@@ -834,6 +983,27 @@ impl FrammpegApp {
         if cur != v.current_frame {
             v.current_frame = cur;
             v.commit_text_edit();
+        }
+        if undo_requested {
+            v.finalize_pending_edits();
+            v.commit_text_edit();
+            let mut state = HistoryState {
+                annotations: &mut v.annotations,
+                moments: &mut v.moments,
+            };
+            if let Some(action) = v.history.undo(&mut state) {
+                v.after_history_change(&action);
+            }
+        } else if redo_requested {
+            v.finalize_pending_edits();
+            v.commit_text_edit();
+            let mut state = HistoryState {
+                annotations: &mut v.annotations,
+                moments: &mut v.moments,
+            };
+            if let Some(action) = v.history.redo(&mut state) {
+                v.after_history_change(&action);
+            }
         }
     }
 }
