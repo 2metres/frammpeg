@@ -108,25 +108,16 @@ fn burn_and_save(
     annotations: &[Annotation],
     font: &FontRef<'_>,
 ) -> io::Result<()> {
-    let img = image::open(source).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("open {}: {e}", source.display()),
-        )
-    })?;
+    let img = image::open(source)
+        .map_err(|e| io::Error::other(format!("open {}: {e}", source.display())))?;
     let mut rgba = img.to_rgba8();
     annotate::burn(&mut rgba, annotations, font);
-    rgba.save(target).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("save {}: {e}", target.display()),
-        )
-    })?;
+    rgba.save(target)
+        .map_err(|e| io::Error::other(format!("save {}: {e}", target.display())))?;
     Ok(())
 }
 
 pub struct ExportResult {
-    pub root: PathBuf,
     pub moments_written: usize,
 }
 
@@ -151,7 +142,6 @@ pub fn export_all(
         written += 1;
     }
     Ok(ExportResult {
-        root: export_root.to_path_buf(),
         moments_written: written,
     })
 }

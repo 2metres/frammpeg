@@ -7,13 +7,10 @@ use ffmpeg_sidecar::event::FfmpegEvent;
 
 #[derive(Debug, Clone)]
 pub enum ExtractEvent {
+    PreparingFfmpeg,
     Progress { current: usize },
     Done { total_frames: usize },
     Error(String),
-}
-
-pub fn ensure_ffmpeg() -> Result<(), String> {
-    ffmpeg_sidecar::download::auto_download().map_err(|e| e.to_string())
 }
 
 /// Spawn a background thread that runs ffmpeg to write PNG frames to
@@ -26,6 +23,12 @@ pub fn spawn_extraction(video: PathBuf, frames_dir: PathBuf) -> Receiver<Extract
 }
 
 fn run_extraction(video: PathBuf, frames_dir: PathBuf, tx: Sender<ExtractEvent>) {
+    let _ = tx.send(ExtractEvent::PreparingFfmpeg);
+    if let Err(e) = ffmpeg_sidecar::download::auto_download() {
+        let _ = tx.send(ExtractEvent::Error(format!("prepare ffmpeg: {e}")));
+        return;
+    }
+
     let pattern = frame_pattern(&frames_dir);
     let mut child = match FfmpegCommand::new()
         .hide_banner()
