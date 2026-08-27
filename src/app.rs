@@ -11,15 +11,20 @@ use egui::{
 };
 
 use crate::extract::{spawn_extraction, ExtractEvent};
+use crate::filmstrip::{self, FilmstripDrawParams, FilmstripGeometry};
 use crate::model::{
     Annotation, Moment, DEFAULT_FONT_SIZE, DEFAULT_STROKE_RGBA, DEFAULT_STROKE_WIDTH,
     DEFAULT_TEXT_RGBA, MAX_BUFFER,
 };
 use crate::session::{self, SessionDirs};
+use crate::thumbs::{self, ThumbCache};
+use crate::transport::{self, TransportAction, TransportView};
 use crate::{export, fonts, theme};
 
 const FRAME_CACHE_SIZE: usize = 5;
 const COPY_TOAST_MS: u64 = 1200;
+const TRANSPORT_ROW_H: f32 = 40.0;
+const BOTTOM_PANEL_H: f32 = 200.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tool {
@@ -52,6 +57,11 @@ struct VideoState {
     video_path: PathBuf,
     total_frames: usize,
     current_frame: usize,
+    prev_current_frame: usize,
+    fps: f32,
+    playing: bool,
+    last_play_tick: Option<Instant>,
+    play_leftover: Duration,
     annotations: HashMap<usize, Vec<Annotation>>,
     moments: Vec<Moment>,
     selected_moment: Option<usize>,
@@ -64,15 +74,35 @@ struct VideoState {
     frame_pixel_size: Option<(u32, u32)>,
     last_copy_at: Option<Instant>,
     last_export_msg: Option<(Instant, String)>,
+    thumbs: ThumbCache,
+    filmstrip_geom: FilmstripGeometry,
 }
 
 impl VideoState {
-    fn new(session: SessionDirs, video_path: PathBuf, total_frames: usize) -> Self {
+    fn new(
+        session: SessionDirs,
+        video_path: PathBuf,
+        total_frames: usize,
+        fps: f32,
+        ctx: &egui::Context,
+    ) -> Self {
+        let thumbs = ThumbCache::new(
+            thumbs::DEFAULT_CAPACITY,
+            session.frames.clone(),
+            thumbs::DEFAULT_THUMB_W,
+            thumbs::DEFAULT_THUMB_H,
+            ctx.clone(),
+        );
         Self {
             session,
             video_path,
             total_frames,
             current_frame: 0,
+            prev_current_frame: 0,
+            fps,
+            playing: false,
+            last_play_tick: None,
+            play_leftover: Duration::ZERO,
             annotations: HashMap::new(),
             moments: Vec::new(),
             selected_moment: None,
@@ -85,7 +115,54 @@ impl VideoState {
             frame_pixel_size: None,
             last_copy_at: None,
             last_export_msg: None,
+            thumbs,
+            filmstrip_geom: FilmstripGeometry::default(),
         }
+    }
+
+    fn seek(&mut self, target: usize) {
+        let last = self.total_frames.saturating_sub(1);
+        let clamped = target.min(last);
+        if clamped != self.current_frame {
+            self.commit_text_edit();
+            self.current_frame = clamped;
+        }
+    }
+
+    fn set_playing(&mut self, playing: bool) {
+        if self.playing == playing {
+            return;
+        }
+        self.playing = playing;
+        if playing {
+            self.last_play_tick = Some(Instant::now());
+            self.play_leftover = Duration::ZERO;
+        } else {
+            self.last_play_tick = None;
+            self.play_leftover = Duration::ZERO;
+        }
+    }
+
+    fn tick_play(&mut self) {
+        if !self.playing || self.total_frames == 0 || self.fps <= 0.0 {
+            return;
+        }
+        let Some(prev) = self.last_play_tick else {
+            self.last_play_tick = Some(Instant::now());
+            return;
+        };
+        let now = Instant::now();
+        let elapsed = now.duration_since(prev) + self.play_leftover;
+        let (frames, leftover) = transport::advance_frames(self.fps, elapsed);
+        if frames > 0 {
+            let next = transport::step_play(self.current_frame, frames, self.total_frames);
+            if next != self.current_frame {
+                self.commit_text_edit();
+                self.current_frame = next;
+            }
+        }
+        self.last_play_tick = Some(now);
+        self.play_leftover = leftover;
     }
 
     fn commit_text_edit(&mut self) {
@@ -186,13 +263,15 @@ impl FrammpegApp {
                     state.preparing = false;
                     state.current = current;
                 }
-                Ok(ExtractEvent::Done { total_frames }) => {
+                Ok(ExtractEvent::Done { total_frames, fps }) => {
                     let extracted = std::mem::replace(&mut self.phase, Phase::Empty);
                     if let Phase::Extracting(s) = extracted {
                         self.phase = Phase::Ready(Box::new(VideoState::new(
                             s.session,
                             s.video_path,
                             total_frames,
+                            fps,
+                            ctx,
                         )));
                     }
                     return;
@@ -329,43 +408,121 @@ impl FrammpegApp {
         });
     }
 
-    fn timeline(&mut self, ui: &mut egui::Ui) {
+    fn bottom_panel(&mut self, ui: &mut egui::Ui) {
         match &mut self.phase {
-            Phase::Ready(v) => {
-                ui.vertical(|ui| {
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        let mut idx = v.current_frame;
-                        let last = v.total_frames.saturating_sub(1);
-                        let response = ui.add(
-                            egui::Slider::new(&mut idx, 0..=last)
-                                .integer()
-                                .show_value(false),
-                        );
-                        if response.changed() {
-                            v.current_frame = idx;
-                            v.commit_text_edit();
-                        }
-                        ui.label(
-                            RichText::new(format!("{}/{}", v.current_frame + 1, v.total_frames))
-                                .monospace()
-                                .color(theme::TEXT_MUTED),
-                        );
-                    });
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new(
-                            "arrows: +/- 1 frame  -  shift+arrows: +/- 10  -  home/end: first/last",
-                        )
-                        .small()
-                        .color(theme::TEXT_MUTED),
-                    );
-                });
+            Phase::Ready(_) => {
+                self.draw_bottom_panel_ready(ui);
             }
             _ => {
                 ui.centered_and_justified(|ui| {
                     ui.label(RichText::new("timeline").color(theme::TEXT_MUTED));
                 });
+            }
+        }
+    }
+
+    fn draw_bottom_panel_ready(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+
+        let (enabled, playing, current_frame, prev_current_frame, total_frames) = {
+            let Phase::Ready(v) = &self.phase else {
+                return;
+            };
+            (
+                v.total_frames > 0,
+                v.playing,
+                v.current_frame,
+                v.prev_current_frame,
+                v.total_frames,
+            )
+        };
+
+        ui.vertical(|ui| {
+            // Transport row (centered).
+            let action = ui
+                .allocate_ui(Vec2::new(ui.available_width(), TRANSPORT_ROW_H), |ui| {
+                    transport::draw(ui, TransportView { enabled, playing })
+                })
+                .inner;
+            if let Some(a) = action {
+                self.apply_transport(a);
+            }
+
+            ui.add_space(2.0);
+
+            // Filmstrip row.
+            let strip_top = ui.cursor().top();
+            if let Phase::Ready(v) = &mut self.phase {
+                v.thumbs.poll(&ctx);
+                let action = filmstrip::draw(
+                    ui,
+                    FilmstripDrawParams {
+                        geom: v.filmstrip_geom,
+                        total_frames: v.total_frames,
+                        current_frame: v.current_frame,
+                        prev_current_frame,
+                        thumbs: &mut v.thumbs,
+                    },
+                );
+                if let Some(target) = action.seek_to {
+                    v.set_playing(false);
+                    v.seek(target);
+                }
+            }
+
+            // Corner overlay: frame counter, top-right of the strip row.
+            let panel_rect = ui.max_rect();
+            let label_pos = Pos2::new(panel_rect.right() - 8.0, strip_top + 8.0);
+            let text = format!("{}/{}", current_frame + 1, total_frames.max(1));
+            let galley = ui.painter().layout_no_wrap(
+                text.clone(),
+                egui::FontId::monospace(11.0),
+                theme::TEXT_MUTED,
+            );
+            let size = galley.size() + Vec2::new(10.0, 4.0);
+            let bg_rect = Rect::from_min_size(Pos2::new(label_pos.x - size.x, label_pos.y), size);
+            ui.painter().rect_filled(
+                bg_rect,
+                CornerRadius::same(3),
+                Color32::from_rgba_unmultiplied(0x1A, 0x1E, 0x23, 210),
+            );
+            ui.painter().text(
+                bg_rect.center(),
+                Align2::CENTER_CENTER,
+                &text,
+                egui::FontId::monospace(11.0),
+                theme::TEXT_MUTED,
+            );
+        });
+    }
+
+    fn apply_transport(&mut self, action: TransportAction) {
+        let Phase::Ready(v) = &mut self.phase else {
+            return;
+        };
+        if v.total_frames == 0 {
+            return;
+        }
+        let last = v.total_frames - 1;
+        match action {
+            TransportAction::Home => {
+                v.set_playing(false);
+                v.seek(0);
+            }
+            TransportAction::End => {
+                v.set_playing(false);
+                v.seek(last);
+            }
+            TransportAction::Back(n) => {
+                v.set_playing(false);
+                v.seek(v.current_frame.saturating_sub(n));
+            }
+            TransportAction::Fwd(n) => {
+                v.set_playing(false);
+                v.seek((v.current_frame + n).min(last));
+            }
+            TransportAction::TogglePlay => {
+                v.set_playing(!v.playing);
             }
         }
     }
@@ -810,6 +967,7 @@ impl FrammpegApp {
         }
         let last = total - 1;
         let mut cur = v.current_frame;
+        let mut toggle_play = false;
         ctx.input(|i| {
             for e in &i.events {
                 if let Event::Key {
@@ -826,14 +984,21 @@ impl FrammpegApp {
                         Key::ArrowRight => cur = (cur + step).min(last),
                         Key::Home => cur = 0,
                         Key::End => cur = last,
+                        Key::Comma => cur = cur.saturating_sub(1),
+                        Key::Period => cur = (cur + 1).min(last),
+                        Key::Space => toggle_play = true,
                         _ => {}
                     }
                 }
             }
         });
         if cur != v.current_frame {
+            v.set_playing(false);
             v.current_frame = cur;
             v.commit_text_edit();
+        }
+        if toggle_play {
+            v.set_playing(!v.playing);
         }
     }
 }
@@ -852,6 +1017,19 @@ impl eframe::App for FrammpegApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll_extraction(&ctx);
+
+        // Snapshot prev_current_frame at the start of the frame so the
+        // filmstrip can auto-scroll on any change made this frame.
+        if let Phase::Ready(v) = &mut self.phase {
+            v.prev_current_frame = v.current_frame;
+        }
+
+        // Drive the play loop before handling keys, so a Space toggle takes
+        // effect on the next frame, not this one.
+        if let Phase::Ready(v) = &mut self.phase {
+            v.tick_play();
+        }
+
         self.handle_keys(&ctx);
 
         if let Some(video) = self.poll_dropped_files(&ctx) {
@@ -872,10 +1050,10 @@ impl eframe::App for FrammpegApp {
             .show(ui, |ui| self.toolbar(ui));
 
         Panel::bottom("timeline")
-            .exact_size(96.0)
+            .exact_size(BOTTOM_PANEL_H)
             .resizable(false)
             .frame(panel_frame)
-            .show(ui, |ui| self.timeline(ui));
+            .show(ui, |ui| self.bottom_panel(ui));
 
         Panel::right("moments")
             .default_size(260.0)
@@ -886,5 +1064,12 @@ impl eframe::App for FrammpegApp {
         CentralPanel::default()
             .frame(Frame::default().fill(theme::CANVAS).inner_margin(8.0))
             .show(ui, |ui| self.viewport(ui));
+
+        // Schedule the next play-tick repaint. Also throttles idle CPU.
+        if let Phase::Ready(v) = &self.phase {
+            if v.playing {
+                ctx.request_repaint_after(transport::frame_period(v.fps));
+            }
+        }
     }
 }
