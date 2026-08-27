@@ -5,6 +5,7 @@ mod app;
 mod export;
 mod extract;
 mod fonts;
+mod history;
 mod model;
 mod session;
 mod theme;
