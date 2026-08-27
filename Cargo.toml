@@ -17,6 +17,9 @@ arboard = "3.6.1"
 rfd = "0.17.2"
 dirs = "6.0.0"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+imageproc = { version = "0.27.0", default-features = false, features = ["text"] }
+ab_glyph = "0.2"
 
 [profile.release]
 lto = "thin"

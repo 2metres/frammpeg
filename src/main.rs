@@ -1,20 +1,24 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod annotate;
 mod app;
+mod export;
+mod extract;
 mod fonts;
+mod model;
 mod session;
 mod theme;
 
 use app::FrammpegApp;
 
 fn main() -> eframe::Result<()> {
-    let session_root = match session::ensure_session_root() {
+    let session_root = match session::ensure_sessions_root() {
         Ok(path) => {
-            eprintln!("frammpeg: session root ready at {}", path.display());
+            eprintln!("frammpeg: sessions root ready at {}", path.display());
             Some(path)
         }
         Err(err) => {
-            eprintln!("frammpeg: could not prepare session root: {err}");
+            eprintln!("frammpeg: could not prepare sessions root: {err}");
             None
         }
     };
