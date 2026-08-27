@@ -27,7 +27,7 @@ impl Default for FilmstripGeometry {
             top_pad: 4.0,
             label_h: 14.0,
             label_every_n: 5,
-            prefetch_pad: 6,
+            prefetch_pad: 30,
         }
     }
 }
@@ -148,8 +148,8 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
             let painter = ui.painter_at(content_rect);
             painter.rect_filled(content_rect, CornerRadius::ZERO, theme::PANEL);
 
-            let x0 = viewport.min.x - content_rect.min.x;
-            let x1 = viewport.max.x - content_rect.min.x;
+            let x0 = viewport.min.x;
+            let x1 = viewport.max.x;
             let visible = geom.visible_range(x0, x1, total_frames);
             let prefetch = geom.prefetch_range(visible, total_frames);
 
@@ -171,24 +171,13 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
                 );
             }
 
-            // Auto-scroll to keep `current_frame` in view when it just changed.
-            // Skip when the pointer is dragging — that's the user scrubbing, and
-            // seeking-to-drag already keeps them centered by definition.
+            // Keep the current frame centered whenever it changes — during play
+            // the filmstrip scrolls past under a fixed center indicator; during
+            // manual navigation the target frame slides to the middle.
             if want_scroll {
-                if let Some((lo, hi)) = visible {
-                    let edge_pad: usize = 1;
-                    let lo_edge = lo.saturating_add(edge_pad).min(hi);
-                    let hi_edge = hi.saturating_sub(edge_pad).max(lo);
-                    if current_frame < lo_edge || current_frame > hi_edge {
-                        let rect = geom.thumb_rect(content_rect.min, current_frame);
-                        ui.scroll_to_rect(rect, Some(Align::Center));
-                        action.scroll_into_view = true;
-                    }
-                } else {
-                    let rect = geom.thumb_rect(content_rect.min, current_frame);
-                    ui.scroll_to_rect(rect, Some(Align::Center));
-                    action.scroll_into_view = true;
-                }
+                let rect = geom.thumb_rect(content_rect.min, current_frame);
+                ui.scroll_to_rect(rect, Some(Align::Center));
+                action.scroll_into_view = true;
             }
 
             handle_interaction(&response, content_rect, geom, total_frames, &mut action);

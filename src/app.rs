@@ -605,8 +605,8 @@ impl FrammpegApp {
                 }
             }
             if let Some(idx) = jump_to {
-                v.current_frame = idx;
-                v.commit_text_edit();
+                v.set_playing(false);
+                v.seek(idx);
             }
         });
     }

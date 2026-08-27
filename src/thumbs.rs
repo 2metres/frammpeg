@@ -1,7 +1,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
+
+const DECODE_WORKERS: usize = 4;
 
 use egui::{ColorImage, TextureHandle, TextureOptions};
 
@@ -115,10 +118,15 @@ impl ThumbCache {
     ) -> Self {
         let (req_tx, req_rx) = mpsc::channel::<Request>();
         let (resp_tx, resp_rx) = mpsc::channel::<Response>();
-        let worker_ctx = ctx.clone();
-        thread::spawn(move || {
-            decode_worker(req_rx, resp_tx, worker_ctx, frames_dir, thumb_w, thumb_h)
-        });
+        let shared_rx = Arc::new(Mutex::new(req_rx));
+        for _ in 0..DECODE_WORKERS {
+            let rx = Arc::clone(&shared_rx);
+            let tx = resp_tx.clone();
+            let worker_ctx = ctx.clone();
+            let dir = frames_dir.clone();
+            thread::spawn(move || decode_worker(rx, tx, worker_ctx, dir, thumb_w, thumb_h));
+        }
+        drop(resp_tx);
         Self {
             lru: Lru::new(capacity),
             pending: HashSet::new(),
@@ -157,19 +165,26 @@ impl ThumbCache {
 
 impl Drop for ThumbCache {
     fn drop(&mut self) {
-        let _ = self.req_tx.send(Request::Shutdown);
+        for _ in 0..DECODE_WORKERS {
+            let _ = self.req_tx.send(Request::Shutdown);
+        }
     }
 }
 
 fn decode_worker(
-    req_rx: Receiver<Request>,
+    req_rx: Arc<Mutex<Receiver<Request>>>,
     resp_tx: Sender<Response>,
     ctx: egui::Context,
     frames_dir: PathBuf,
     thumb_w: u32,
     thumb_h: u32,
 ) {
-    while let Ok(msg) = req_rx.recv() {
+    loop {
+        let msg = {
+            let rx = req_rx.lock().unwrap();
+            rx.recv()
+        };
+        let Ok(msg) = msg else { break };
         match msg {
             Request::Shutdown => break,
             Request::Decode(idx) => {

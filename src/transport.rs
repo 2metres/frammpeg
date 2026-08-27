@@ -1,11 +1,17 @@
 use std::time::Duration;
 
-use egui::{Align, Button, Layout, RichText, Ui, Vec2};
+use egui::{Button, RichText, Ui, Vec2};
 
 use crate::theme;
 
 const STEP_SMALL: usize = 1;
 const STEP_LARGE: usize = 10;
+
+const STEP_BUTTON_W: f32 = 34.0;
+const PLAY_BUTTON_W: f32 = 48.0;
+const BUTTON_GAP: f32 = 4.0;
+const STEP_BUTTON_COUNT: f32 = 6.0;
+const ROW_WIDTH: f32 = STEP_BUTTON_W * STEP_BUTTON_COUNT + PLAY_BUTTON_W + BUTTON_GAP * 6.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransportAction {
@@ -26,31 +32,31 @@ pub struct TransportView {
 pub fn draw(ui: &mut Ui, view: TransportView) -> Option<TransportAction> {
     let mut action: Option<TransportAction> = None;
 
-    ui.with_layout(Layout::top_down(Align::Center), |ui| {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            if step_button(ui, "\u{23EE}", view.enabled, "First frame (Home)") {
-                action = Some(TransportAction::Home);
-            }
-            if step_button(ui, "\u{23EA}", view.enabled, "Back 10 (Shift+Left)") {
-                action = Some(TransportAction::Back(STEP_LARGE));
-            }
-            if step_button(ui, "\u{25C0}", view.enabled, "Back 1 (Left / ,)") {
-                action = Some(TransportAction::Back(STEP_SMALL));
-            }
-            if play_button(ui, view) {
-                action = Some(TransportAction::TogglePlay);
-            }
-            if step_button(ui, "\u{25B6}", view.enabled, "Forward 1 (Right / .)") {
-                action = Some(TransportAction::Fwd(STEP_SMALL));
-            }
-            if step_button(ui, "\u{23E9}", view.enabled, "Forward 10 (Shift+Right)") {
-                action = Some(TransportAction::Fwd(STEP_LARGE));
-            }
-            if step_button(ui, "\u{23ED}", view.enabled, "Last frame (End)") {
-                action = Some(TransportAction::End);
-            }
-        });
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = BUTTON_GAP;
+        let pad = ((ui.available_width() - ROW_WIDTH) * 0.5).max(0.0);
+        ui.add_space(pad);
+        if step_button(ui, "\u{23EE}", view.enabled, "First frame (Home)") {
+            action = Some(TransportAction::Home);
+        }
+        if step_button(ui, "\u{23EA}", view.enabled, "Back 10 (Shift+Left)") {
+            action = Some(TransportAction::Back(STEP_LARGE));
+        }
+        if step_button(ui, "\u{25C0}", view.enabled, "Back 1 (Left / ,)") {
+            action = Some(TransportAction::Back(STEP_SMALL));
+        }
+        if play_button(ui, view) {
+            action = Some(TransportAction::TogglePlay);
+        }
+        if step_button(ui, "\u{25B6}", view.enabled, "Forward 1 (Right / .)") {
+            action = Some(TransportAction::Fwd(STEP_SMALL));
+        }
+        if step_button(ui, "\u{23E9}", view.enabled, "Forward 10 (Shift+Right)") {
+            action = Some(TransportAction::Fwd(STEP_LARGE));
+        }
+        if step_button(ui, "\u{23ED}", view.enabled, "Last frame (End)") {
+            action = Some(TransportAction::End);
+        }
     });
 
     action
