@@ -4,10 +4,13 @@ mod annotate;
 mod app;
 mod export;
 mod extract;
+mod filmstrip;
 mod fonts;
 mod model;
 mod session;
 mod theme;
+mod thumbs;
+mod transport;
 
 use app::FrammpegApp;
 

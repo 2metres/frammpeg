@@ -9,7 +9,7 @@ use ffmpeg_sidecar::event::FfmpegEvent;
 pub enum ExtractEvent {
     PreparingFfmpeg,
     Progress { current: usize },
-    Done { total_frames: usize },
+    Done { total_frames: usize, fps: f32 },
     Error(String),
 }
 
@@ -54,7 +54,17 @@ fn run_extraction(video: PathBuf, frames_dir: PathBuf, tx: Sender<ExtractEvent>)
     };
 
     let mut last_error: Option<String> = None;
+    let mut fps: Option<f32> = None;
+    let mut duration_s: Option<f64> = None;
     for event in iter {
+        if let Some(v) = video_fps_from_event(&event) {
+            if v > 0.0 && fps.is_none() {
+                fps = Some(v);
+            }
+        }
+        if let FfmpegEvent::ParsedDuration(d) = &event {
+            duration_s.get_or_insert(d.duration);
+        }
         match event {
             FfmpegEvent::Progress(p) => {
                 let _ = tx.send(ExtractEvent::Progress {
@@ -84,12 +94,53 @@ fn run_extraction(video: PathBuf, frames_dir: PathBuf, tx: Sender<ExtractEvent>)
             let _ = tx.send(ExtractEvent::Error(msg));
         }
         Ok(n) => {
-            let _ = tx.send(ExtractEvent::Done { total_frames: n });
+            let final_fps = resolve_fps(fps, duration_s, n);
+            let _ = tx.send(ExtractEvent::Done {
+                total_frames: n,
+                fps: final_fps,
+            });
         }
         Err(e) => {
             let _ = tx.send(ExtractEvent::Error(format!("count frames: {e}")));
         }
     }
+}
+
+/// Return the fps of the first video input stream mentioned in the event, if any.
+pub fn video_fps_from_event(event: &FfmpegEvent) -> Option<f32> {
+    if let FfmpegEvent::ParsedInputStream(s) = event {
+        if let Some(v) = s.video_data() {
+            return Some(v.fps);
+        }
+    }
+    None
+}
+
+const FALLBACK_FPS: f32 = 30.0;
+
+/// Pick the best fps we can from what ffmpeg told us.
+///
+/// Preference order:
+/// 1. The stream's declared fps (fast and accurate).
+/// 2. `frame_count / duration_seconds` (works when the stream reported no fps
+///    but we got a duration).
+/// 3. A conservative 30fps fallback (better than divide-by-zero panics in the
+///    play loop).
+pub fn resolve_fps(stream_fps: Option<f32>, duration_s: Option<f64>, frame_count: usize) -> f32 {
+    if let Some(f) = stream_fps {
+        if f.is_finite() && f > 0.0 {
+            return f;
+        }
+    }
+    if let (Some(d), true) = (duration_s, frame_count > 0) {
+        if d > 0.0 {
+            let derived = frame_count as f64 / d;
+            if derived.is_finite() && derived > 0.0 {
+                return derived as f32;
+            }
+        }
+    }
+    FALLBACK_FPS
 }
 
 fn frame_pattern(frames_dir: &Path) -> String {
@@ -102,8 +153,59 @@ fn frame_pattern(frames_dir: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ffmpeg_sidecar::event::{Stream, StreamTypeSpecificData, VideoStream};
     use std::collections::HashMap;
     use std::time::Duration;
+
+    fn video_stream(fps: f32) -> Stream {
+        Stream {
+            format: "h264".into(),
+            language: String::new(),
+            parent_index: 0,
+            stream_index: 0,
+            raw_log_message: String::new(),
+            type_specific_data: StreamTypeSpecificData::Video(VideoStream {
+                pix_fmt: "yuv420p".into(),
+                width: 1920,
+                height: 1080,
+                fps,
+            }),
+        }
+    }
+
+    #[test]
+    fn video_fps_read_from_parsed_input_stream() {
+        let ev = FfmpegEvent::ParsedInputStream(video_stream(29.97));
+        assert_eq!(video_fps_from_event(&ev), Some(29.97));
+    }
+
+    #[test]
+    fn video_fps_ignores_non_video_event() {
+        let ev = FfmpegEvent::LogEOF;
+        assert_eq!(video_fps_from_event(&ev), None);
+    }
+
+    #[test]
+    fn resolve_fps_prefers_stream_value() {
+        assert_eq!(resolve_fps(Some(24.0), Some(3.0), 90), 24.0);
+    }
+
+    #[test]
+    fn resolve_fps_derives_from_duration_when_stream_missing() {
+        // 3s clip, 90 frames -> 30 fps.
+        assert!((resolve_fps(None, Some(3.0), 90) - 30.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn resolve_fps_falls_back_when_everything_missing() {
+        assert_eq!(resolve_fps(None, None, 0), FALLBACK_FPS);
+    }
+
+    #[test]
+    fn resolve_fps_falls_back_on_zero_stream_value() {
+        // ffmpeg has been known to report fps=0 for image sequences.
+        assert!((resolve_fps(Some(0.0), Some(3.0), 90) - 30.0).abs() < 0.001);
+    }
 
     /// End-to-end sanity check: generate a 3-second testsrc video, extract
     /// all its frames, then run the export pipeline on one moment. Requires
@@ -160,7 +262,9 @@ mod tests {
                 panic!("extraction timed out");
             }
             match rx.recv_timeout(Duration::from_secs(1)) {
-                Ok(ExtractEvent::Done { total_frames: n }) => {
+                Ok(ExtractEvent::Done {
+                    total_frames: n, ..
+                }) => {
                     total_frames = n;
                     break;
                 }
