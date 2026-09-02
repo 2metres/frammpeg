@@ -61,17 +61,16 @@ pub fn draw(ui: &mut Ui, view: TransportView) -> Option<TransportAction> {
             action = Some(TransportAction::End);
         }
 
-        ui.add_space(BUTTON_GAP * 2.0);
-        ui.label(RichText::new("Zoom").size(11.0).color(theme::TEXT_MUTED));
-        ui.add_space(BUTTON_GAP);
-        let slider = egui::Slider::new(&mut new_scale, 0.0..=1.0)
-            .show_value(false)
-            .min_decimals(0)
-            .max_decimals(2);
-        let slider_resp = ui.add_enabled(view.enabled, slider.fixed_decimals(2));
-        if slider_resp.changed() {
-            action = Some(TransportAction::ScaleChanged(new_scale));
-        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let slider = egui::Slider::new(&mut new_scale, 0.0..=1.0)
+                .show_value(false)
+                .min_decimals(0)
+                .max_decimals(2);
+            let slider_resp = ui.add_enabled(view.enabled, slider.fixed_decimals(2));
+            if slider_resp.changed() {
+                action = Some(TransportAction::ScaleChanged(new_scale));
+            }
+        });
     });
 
     action
