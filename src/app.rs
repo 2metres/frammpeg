@@ -37,7 +37,7 @@ fn tool_button(
     selected: bool,
 ) -> egui::Response {
     let color = if selected { theme::ACCENT } else { theme::TEXT };
-    icons.ui(ui, icon, TOOL_ICON_PT, color, TOOL_BUTTON_SIZE, true)
+    icons.ui(ui, icon, TOOL_ICON_PT, color, TOOL_BUTTON_SIZE, false)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -565,7 +565,7 @@ impl FrammpegApp {
                     let reset_enabled = v.total_frames > 0
                         && (v.trim_start != 0 || v.trim_end + 1 != v.total_frames);
                     let reset_response =
-                        ui.add_enabled(reset_enabled, egui::Button::new("Reset trim"));
+                        ui.add_enabled(reset_enabled, egui::Button::new("Reset trim").frame(false));
                     if reset_response
                         .on_hover_text("Reset the yellow trim handles to the full clip")
                         .clicked()
@@ -576,7 +576,7 @@ impl FrammpegApp {
 
                 ui.separator();
                 if ui
-                    .button("Export")
+                    .add(egui::Button::new("Export").frame(false))
                     .on_hover_text("Write each moment's buffer + annotated frame to disk")
                     .clicked()
                 {
@@ -604,7 +604,7 @@ impl FrammpegApp {
                     }
                 }
                 if ui
-                    .button("Copy export path")
+                    .add(egui::Button::new("Copy export path").frame(false))
                     .on_hover_text("Copy the export folder path to the clipboard")
                     .clicked()
                 {
