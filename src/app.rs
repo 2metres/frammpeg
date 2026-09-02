@@ -521,23 +521,6 @@ impl FrammpegApp {
             ui.add_space(4.0);
 
             if let Phase::Ready(v) = phase {
-                let mut tool = v.tool;
-                if tool_button(ui, icons, Icon::Rectangle, tool == Tool::Rect)
-                    .on_hover_text("Draw a rectangle (click and drag on the frame)")
-                    .clicked()
-                {
-                    tool = Tool::Rect;
-                    v.commit_text_edit();
-                }
-                if tool_button(ui, icons, Icon::Text, tool == Tool::Text)
-                    .on_hover_text("Add a text label (click on the frame, then type)")
-                    .clicked()
-                {
-                    tool = Tool::Text;
-                }
-                v.tool = tool;
-
-                ui.separator();
                 let moments_count = v.moments.len();
                 let moments_label = if moments_count > 0 && !v.moments_panel_open {
                     format!("{}", moments_count)
@@ -1064,7 +1047,8 @@ impl FrammpegApp {
     }
 
     fn draw_viewport_ready(&mut self, ui: &mut egui::Ui) {
-        let Phase::Ready(v) = &mut self.phase else {
+        let Self { phase, icons, .. } = self;
+        let Phase::Ready(v) = phase else {
             return;
         };
         let ctx = ui.ctx().clone();
@@ -1098,6 +1082,42 @@ impl FrammpegApp {
             Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
             Color32::WHITE,
         );
+
+        // Floating tool palette overlay
+        let palette_result = Area::new(egui::Id::new("frammpeg-tool-palette"))
+            .order(Order::Foreground)
+            .fixed_pos(rect.min + Vec2::new(12.0, 12.0))
+            .show(ui.ctx(), |ui| {
+                ui.vertical(|ui| {
+                    if tool_button(ui, icons, Icon::Rectangle, v.tool == Tool::Rect)
+                        .on_hover_text("Rectangle (click and drag on the frame)")
+                        .clicked()
+                    {
+                        v.tool = Tool::Rect;
+                        v.commit_text_edit();
+                    }
+                    if tool_button(ui, icons, Icon::Text, v.tool == Tool::Text)
+                        .on_hover_text("Text label (click on the frame, then type)")
+                        .clicked()
+                    {
+                        v.tool = Tool::Text;
+                    }
+                })
+            });
+        // Paint rounded background behind the palette buttons
+        let bg_rect = palette_result.response.rect.expand(6.0);
+        ui.ctx()
+            .layer_painter(egui::LayerId::new(
+                Order::Background,
+                egui::Id::new("frammpeg-tool-palette-bg"),
+            ))
+            .rect(
+                bg_rect,
+                CornerRadius::same(8),
+                Color32::from_rgba_unmultiplied(20, 23, 27, 220),
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(58, 66, 76, 180)),
+                egui::StrokeKind::Outside,
+            );
 
         let ui_to_frame = |p: Pos2| -> (f32, f32) {
             (
