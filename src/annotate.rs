@@ -1,4 +1,4 @@
-use ab_glyph::{FontRef, PxScale};
+use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{Rgba, RgbaImage};
 use imageproc::drawing::{draw_hollow_rect_mut, draw_text_mut};
 use imageproc::rect::Rect;
@@ -87,11 +87,14 @@ fn draw_text(
         return;
     }
     let scale = PxScale::from(font_size.max(1.0));
+    let scaled_font = font.as_scaled(scale);
+    let descent = scaled_font.descent();
+    let y_adjusted = y + descent;
     draw_text_mut(
         img,
         Rgba(color),
         x.round() as i32,
-        y.round() as i32,
+        y_adjusted.round() as i32,
         scale,
         font,
         text,
@@ -203,5 +206,46 @@ mod tests {
         for px in img.pixels() {
             assert_eq!(px.0, [255, 255, 255, 255]);
         }
+    }
+
+    #[test]
+    fn text_baseline_anchors_at_top() {
+        let mut img = white_image(200, 100);
+        let font = font();
+        let y_coord = 20.0;
+        burn(
+            &mut img,
+            &[Annotation::Text {
+                x: 10.0,
+                y: y_coord,
+                text: "Test".to_string(),
+                font_size: 24.0,
+                color: DEFAULT_TEXT_RGBA,
+            }],
+            &font,
+        );
+        // Find the topmost modified pixel in the text area.
+        let mut topmost = None;
+        for y in 0..100 {
+            for x in 0..200 {
+                if img.get_pixel(x, y).0 != [255, 255, 255, 255] {
+                    topmost = Some(y);
+                    break;
+                }
+            }
+            if topmost.is_some() {
+                break;
+            }
+        }
+        // The topmost drawn pixel should be at or very near y_coord (within 2px).
+        assert!(
+            topmost.is_some(),
+            "expected text to be drawn but found no modified pixels"
+        );
+        let top = topmost.unwrap() as f32;
+        assert!(
+            (top - y_coord).abs() <= 2.0,
+            "topmost pixel at y={top} but expected near y={y_coord} (TOP-aligned)"
+        );
     }
 }

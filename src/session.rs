@@ -16,14 +16,13 @@ pub fn ensure_sessions_root() -> io::Result<PathBuf> {
 }
 
 pub struct SessionDirs {
-    #[allow(dead_code)]
     pub root: PathBuf,
     pub frames: PathBuf,
     pub export: PathBuf,
 }
 
 pub fn create_session(sessions_root: &Path) -> io::Result<SessionDirs> {
-    let stamp = Local::now().format("%Y-%m-%d_%H%M%S").to_string();
+    let stamp = Local::now().format("%Y-%m-%d_%H%M%S_%9f").to_string();
     let root = sessions_root.join(stamp);
     let frames = root.join("frames");
     let export = root.join("export");
@@ -53,4 +52,26 @@ pub fn count_frames(frames_dir: &Path) -> io::Result<usize> {
         }
     }
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn consecutive_sessions_have_unique_paths() {
+        let temp = std::env::temp_dir().join("frammpeg-test-sessions");
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+
+        let s1 = create_session(&temp).unwrap();
+        let s2 = create_session(&temp).unwrap();
+
+        assert_ne!(
+            s1.root, s2.root,
+            "two consecutive create_session calls must produce different paths"
+        );
+
+        std::fs::remove_dir_all(&temp).unwrap();
+    }
 }
