@@ -860,6 +860,39 @@ impl FrammpegApp {
                 }
                 if selected {
                     ui.add_space(4.0);
+                    if let Some(texture) = v.thumbs.get(frame_index) {
+                        let response = ui.add(
+                            egui::Image::from_texture(&texture)
+                                .fit_to_exact_size(Vec2::new(180.0, 180.0))
+                                .sense(Sense::click()),
+                        );
+                        if response.clicked() {
+                            jump_to = Some(frame_index);
+                        }
+                    } else {
+                        let (rect, _) =
+                            ui.allocate_exact_size(Vec2::new(180.0, 180.0), Sense::hover());
+                        ui.painter().rect_filled(
+                            rect,
+                            CornerRadius::same(4),
+                            theme::WIDGET_IDLE,
+                        );
+                        ui.painter().text(
+                            rect.center(),
+                            Align2::CENTER_CENTER,
+                            format!("Frame {}", frame_index + 1),
+                            egui::FontId::proportional(14.0),
+                            theme::TEXT_MUTED,
+                        );
+                        v.thumbs.request(frame_index);
+                    }
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(format!("Frame {}", frame_index + 1))
+                            .color(theme::TEXT_MUTED)
+                            .small(),
+                    );
+                    ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("buffer +/-").small().color(theme::TEXT_MUTED));
                         let mut b = buffer;
