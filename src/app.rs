@@ -894,17 +894,52 @@ impl FrammpegApp {
                     let p = pointer_pos.unwrap();
                     let (fx, fy) = ui_to_frame(p);
                     v.commit_text_edit();
-                    let list = v.annotations.entry(current).or_default();
-                    list.push(Annotation::Text {
-                        x: fx,
-                        y: fy,
-                        text: String::new(),
-                        font_size: DEFAULT_FONT_SIZE,
-                        color: DEFAULT_TEXT_RGBA,
-                    });
-                    v.editing_text = Some(list.len() - 1);
-                    v.text_buffer.clear();
-                    v.text_focus_pending = true;
+
+                    // Hit-test existing text annotations first.
+                    let mut hit_index = None;
+                    if let Some(list) = v.annotations.get(&current) {
+                        for (i, ann) in list.iter().enumerate() {
+                            if let Annotation::Text {
+                                x,
+                                y,
+                                text,
+                                font_size,
+                                ..
+                            } = ann
+                            {
+                                let w = font_size * text.chars().count() as f32 * 0.6;
+                                let h = font_size * 1.2;
+                                if fx >= *x && fx <= *x + w && fy >= *y && fy <= *y + h {
+                                    hit_index = Some(i);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(idx) = hit_index {
+                        // Select existing text for editing.
+                        if let Some(Annotation::Text { text, .. }) =
+                            v.annotations.get(&current).and_then(|l| l.get(idx))
+                        {
+                            v.editing_text = Some(idx);
+                            v.text_buffer = text.clone();
+                            v.text_focus_pending = true;
+                        }
+                    } else {
+                        // Create new text annotation.
+                        let list = v.annotations.entry(current).or_default();
+                        list.push(Annotation::Text {
+                            x: fx,
+                            y: fy,
+                            text: String::new(),
+                            font_size: DEFAULT_FONT_SIZE,
+                            color: DEFAULT_TEXT_RGBA,
+                        });
+                        v.editing_text = Some(list.len() - 1);
+                        v.text_buffer.clear();
+                        v.text_focus_pending = true;
+                    }
                 }
             }
         }
