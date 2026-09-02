@@ -6,7 +6,7 @@ use ab_glyph::FontRef;
 use chrono::Local;
 
 use crate::annotate;
-use crate::model::{buffer_range, Annotation, Moment};
+use crate::model::{buffer_range_within, Annotation, Moment};
 use crate::session;
 
 /// One planned output file for a moment's export folder.
@@ -41,10 +41,18 @@ pub fn plan_moment(
     moment: &Moment,
     one_based_index: usize,
     total_frames: usize,
+    trim_start: usize,
+    trim_end: usize,
     frames_dir: &Path,
     export_root: &Path,
 ) -> Option<PlannedMoment> {
-    let (lo, hi) = buffer_range(moment.frame_index, moment.buffer, total_frames)?;
+    if total_frames == 0 {
+        return None;
+    }
+    if moment.frame_index < trim_start || moment.frame_index > trim_end {
+        return None;
+    }
+    let (lo, hi) = buffer_range_within(moment.frame_index, moment.buffer, trim_start, trim_end)?;
     let dir = export_root.join(moment_dir_name(one_based_index));
 
     let mut files = Vec::with_capacity(hi - lo + 1);
@@ -61,7 +69,7 @@ pub fn plan_moment(
     }
 
     let note_path = dir.join("note.md");
-    let note_body = note_markdown(moment);
+    let note_body = note_markdown(moment, trim_start, trim_end, total_frames);
 
     Some(PlannedMoment {
         dir,
@@ -71,7 +79,12 @@ pub fn plan_moment(
     })
 }
 
-fn note_markdown(moment: &Moment) -> String {
+fn note_markdown(
+    moment: &Moment,
+    trim_start: usize,
+    trim_end: usize,
+    total_frames: usize,
+) -> String {
     let stamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let disk_index = moment.frame_index + 1;
     let body = if moment.note.trim().is_empty() {
@@ -80,7 +93,14 @@ fn note_markdown(moment: &Moment) -> String {
         moment.note.trim().to_string()
     };
     format!(
-        "# Frame {disk_index}\n\nExported: {stamp}\nBuffer: +/- {buf} frames\n\n{body}\n",
+        "# Frame {disk_index}\n\n\
+         Exported: {stamp}\n\
+         Source range: {r_lo}\u{2013}{r_hi} / {total}\n\
+         Buffer: +/- {buf} frames\n\n\
+         {body}\n",
+        r_lo = trim_start + 1,
+        r_hi = trim_end + 1,
+        total = total_frames,
         buf = moment.buffer,
     )
 }
@@ -125,14 +145,31 @@ pub fn export_all(
     moments: &[Moment],
     annotations: &HashMap<usize, Vec<Annotation>>,
     total_frames: usize,
+    trim_start: usize,
+    trim_end: usize,
     frames_dir: &Path,
     export_root: &Path,
 ) -> io::Result<ExportResult> {
     std::fs::create_dir_all(export_root)?;
     let font = annotate::font();
     let mut written = 0usize;
-    for (i, moment) in moments.iter().enumerate() {
-        let plan = match plan_moment(moment, i + 1, total_frames, frames_dir, export_root) {
+    // Walk moments in order but only assign folder numbers to the in-range
+    // ones so `moment-01`, `moment-02` etc. stay contiguous in the export.
+    let mut folder_index = 0usize;
+    for moment in moments {
+        if moment.frame_index < trim_start || moment.frame_index > trim_end {
+            continue;
+        }
+        folder_index += 1;
+        let plan = match plan_moment(
+            moment,
+            folder_index,
+            total_frames,
+            trim_start,
+            trim_end,
+            frames_dir,
+            export_root,
+        ) {
             Some(p) => p,
             None => continue,
         };
@@ -162,6 +199,8 @@ mod tests {
             &moment,
             1,
             100,
+            0,
+            99,
             Path::new("/tmp/frames"),
             Path::new("/tmp/export"),
         )
@@ -189,6 +228,8 @@ mod tests {
             &moment,
             2,
             100,
+            0,
+            99,
             Path::new("/tmp/frames"),
             Path::new("/tmp/export"),
         )
@@ -211,6 +252,8 @@ mod tests {
             &moment,
             3,
             100,
+            0,
+            99,
             Path::new("/tmp/frames"),
             Path::new("/tmp/export"),
         )
@@ -218,6 +261,48 @@ mod tests {
         assert_eq!(plan.files.len(), 8);
         assert!(plan.files[0].target.ends_with("frame-0093.png"));
         assert!(plan.files[7].target.ends_with("frame-0100.png"));
+    }
+
+    #[test]
+    fn plan_clamps_to_trim_range() {
+        let moment = Moment {
+            frame_index: 50,
+            buffer: 10,
+            note: String::new(),
+        };
+        let plan = plan_moment(
+            &moment,
+            1,
+            100,
+            45,
+            55,
+            Path::new("/tmp/frames"),
+            Path::new("/tmp/export"),
+        )
+        .unwrap();
+        // Buffer would have been [40, 60] but trim caps it to [45, 55] = 11 files.
+        assert_eq!(plan.files.len(), 11);
+        assert!(plan.files[0].target.ends_with("frame-0046.png"));
+        assert!(plan.files[10].target.ends_with("frame-0056.png"));
+    }
+
+    #[test]
+    fn plan_none_when_moment_outside_trim_range() {
+        let moment = Moment {
+            frame_index: 5,
+            buffer: 0,
+            note: String::new(),
+        };
+        assert!(plan_moment(
+            &moment,
+            1,
+            100,
+            10,
+            30,
+            Path::new("/tmp/frames"),
+            Path::new("/tmp/export"),
+        )
+        .is_none());
     }
 
     #[test]
@@ -230,6 +315,8 @@ mod tests {
         assert!(plan_moment(
             &moment,
             1,
+            0,
+            0,
             0,
             Path::new("/tmp/frames"),
             Path::new("/tmp/export")
@@ -244,10 +331,24 @@ mod tests {
             buffer: DEFAULT_BUFFER,
             note: "  a note  ".to_string(),
         };
-        let body = note_markdown(&m);
+        let body = note_markdown(&m, 0, 99, 100);
         assert!(body.contains("Frame 41"));
         assert!(body.contains("Buffer: +/- 5"));
         assert!(body.contains("a note"));
+    }
+
+    #[test]
+    fn note_body_includes_source_range() {
+        let m = Moment {
+            frame_index: 40,
+            buffer: DEFAULT_BUFFER,
+            note: "n".to_string(),
+        };
+        let body = note_markdown(&m, 10, 60, 100);
+        assert!(
+            body.contains("Source range: 11\u{2013}61 / 100"),
+            "note body missing source range line: {body}"
+        );
     }
 
     #[test]
@@ -257,7 +358,7 @@ mod tests {
             buffer: 1,
             note: "   ".to_string(),
         };
-        assert!(note_markdown(&m).contains("(no note)"));
+        assert!(note_markdown(&m, 0, 9, 10).contains("(no note)"));
     }
 
     #[test]
@@ -292,7 +393,7 @@ mod tests {
             }],
         );
 
-        let result = export_all(&[moment], &anns, 2, &frames, &export).unwrap();
+        let result = export_all(&[moment], &anns, 2, 0, 1, &frames, &export).unwrap();
         assert_eq!(result.moments_written, 1);
 
         let moment_dir = export.join("moment-01");
@@ -313,6 +414,48 @@ mod tests {
         let note_body = std::fs::read_to_string(&note).unwrap();
         assert!(note_body.contains("boxy"));
         assert!(note_body.contains("Frame 1"));
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn export_all_skips_moments_outside_trim() {
+        let tmp = tempdir();
+        let frames = tmp.join("frames");
+        let export = tmp.join("export");
+        std::fs::create_dir_all(&frames).unwrap();
+        std::fs::create_dir_all(&export).unwrap();
+        let white = image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 255, 255, 255]));
+        for i in 0..10 {
+            white.save(session::frame_path(&frames, i)).unwrap();
+        }
+
+        let moments = vec![
+            Moment {
+                frame_index: 1,
+                buffer: 0,
+                note: "out-low".into(),
+            },
+            Moment {
+                frame_index: 5,
+                buffer: 0,
+                note: "in".into(),
+            },
+            Moment {
+                frame_index: 9,
+                buffer: 0,
+                note: "out-high".into(),
+            },
+        ];
+        let anns = HashMap::new();
+        // Trim range [3, 7] excludes the first and third moments.
+        let result = export_all(&moments, &anns, 10, 3, 7, &frames, &export).unwrap();
+        assert_eq!(result.moments_written, 1);
+        assert!(export.join("moment-01").exists());
+        assert!(!export.join("moment-02").exists());
+        let note_body = std::fs::read_to_string(export.join("moment-01/note.md")).unwrap();
+        assert!(note_body.contains("in"));
+        assert!(note_body.contains("Source range: 4\u{2013}8 / 10"));
 
         std::fs::remove_dir_all(&tmp).ok();
     }

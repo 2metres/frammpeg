@@ -300,8 +300,16 @@ mod tests {
             }],
         );
 
-        let result =
-            export::export_all(&[moment], &anns, total_frames, &frames, &export_root).unwrap();
+        let result = export::export_all(
+            &[moment],
+            &anns,
+            total_frames,
+            0,
+            total_frames - 1,
+            &frames,
+            &export_root,
+        )
+        .unwrap();
         assert_eq!(result.moments_written, 1);
 
         // The moment folder must exist with the right filenames.
