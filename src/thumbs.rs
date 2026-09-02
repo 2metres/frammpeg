@@ -42,6 +42,11 @@ where
         self.map.len()
     }
 
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
     pub fn contains(&self, k: &K) -> bool {
         self.map.contains_key(k)
     }
