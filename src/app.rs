@@ -580,6 +580,7 @@ impl FrammpegApp {
                         v.trim_end,
                         &v.session.frames,
                         &v.session.export,
+                        &v.video_path,
                     ) {
                         Ok(res) => {
                             v.last_export_msg = Some((

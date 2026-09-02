@@ -308,6 +308,7 @@ mod tests {
             total_frames - 1,
             &frames,
             &export_root,
+            &video,
         )
         .unwrap();
         assert_eq!(result.moments_written, 1);
@@ -324,7 +325,7 @@ mod tests {
             };
             assert!(want.exists(), "missing {want:?}");
         }
-        assert!(dir.join("note.md").exists());
+        assert!(export_root.join("moments.yaml").exists());
 
         // The annotated PNG must be a valid image and readable.
         let img = image::open(dir.join("frame-0031-annotated.png"))
