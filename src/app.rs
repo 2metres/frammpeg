@@ -111,6 +111,7 @@ struct VideoState {
     trim_end: usize,
     trim_edit: Option<TrimEditSnapshot>,
     scroll_accumulator: f32,
+    trim_scroll_override: Option<f32>,
     strip_stride: usize,
     strip_scale: f32,
     frame_input_edit: Option<String>,
@@ -188,6 +189,7 @@ impl VideoState {
             trim_end,
             trim_edit: None,
             scroll_accumulator: 0.0,
+            trim_scroll_override: None,
             strip_stride: 1,
             strip_scale: 1.0,
             frame_input_edit: None,
@@ -672,6 +674,7 @@ impl FrammpegApp {
                         trim_end: &mut v.trim_end,
                         thumbs: &mut v.thumbs,
                         scroll_accumulator: &mut v.scroll_accumulator,
+                        trim_scroll_override: &mut v.trim_scroll_override,
                         stride,
                     },
                 );
