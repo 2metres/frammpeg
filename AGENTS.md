@@ -35,9 +35,24 @@ Single portable binary. No `brew install ffmpeg` prerequisite.
 
 ```bash
 cargo run --release           # launch the desktop app
-cargo test                    # unit tests
+cargo test                    # unit tests (or use nextest)
+cargo nextest run             # recommended test runner with better output
 cargo clippy -- -D warnings   # lint
 ```
+
+**nextest** is the recommended test runner. Install it once globally:
+
+```bash
+cargo install cargo-nextest --locked
+```
+
+If installation fails due to a yanked upstream dependency (e.g. `chacha20 v0.10.0`), pin an older nextest version:
+
+```bash
+cargo install cargo-nextest --version 0.9.72 --locked
+```
+
+Project test config lives in `.config/nextest.toml`. Both `cargo test` and `cargo nextest run` work.
 
 ## Architecture Overview
 
