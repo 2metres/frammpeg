@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use egui::{Button, RichText, Ui, Vec2};
+use egui::{Button, Color32, RichText, Ui, Vec2};
 
 use crate::theme;
 
@@ -64,11 +64,11 @@ pub fn draw(ui: &mut Ui, view: TransportView) -> Option<TransportAction> {
 
 fn step_button(ui: &mut Ui, glyph: &str, enabled: bool, tooltip: &str) -> bool {
     let color = if enabled {
-        theme::TEXT
+        Color32::WHITE
     } else {
         theme::TEXT_MUTED
     };
-    let text = RichText::new(glyph).size(20.0).color(color);
+    let text = RichText::new(glyph).size(22.0).color(color).strong();
     let btn = Button::new(text).min_size(Vec2::new(34.0, 30.0));
     ui.add_enabled(enabled, btn)
         .on_hover_text(tooltip)
@@ -78,11 +78,11 @@ fn step_button(ui: &mut Ui, glyph: &str, enabled: bool, tooltip: &str) -> bool {
 fn play_button(ui: &mut Ui, view: TransportView) -> bool {
     let glyph = if view.playing { "\u{23F8}" } else { "\u{25B6}" };
     let color = if view.enabled {
-        theme::ACCENT
+        Color32::WHITE
     } else {
         theme::TEXT_MUTED
     };
-    let text = RichText::new(glyph).size(24.0).color(color).strong();
+    let text = RichText::new(glyph).size(28.0).color(color).strong();
     let btn = Button::new(text).min_size(Vec2::new(48.0, 30.0));
     let tooltip = if view.playing {
         "Pause (Space)"
