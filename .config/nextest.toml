@@ -1,0 +1,8 @@
+[profile.default]
+retries = 0
+test-threads = "num-cpus"
+status-level = "fail"
+
+[profile.default.junit]
+store-success-output = false
+store-failure-output = true
