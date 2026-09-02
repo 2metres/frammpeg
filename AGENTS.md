@@ -31,6 +31,29 @@ Single portable binary. No `brew install ffmpeg` prerequisite.
 - Portability is a requirement; anything assuming a system dependency needs a portable replacement path called out.
 - Rust style: `cargo fmt`, `cargo clippy -- -D warnings` clean.
 
+## Build & Test
+
+```bash
+cargo run --release           # launch the desktop app
+cargo test                    # unit tests
+cargo clippy -- -D warnings   # lint
+```
+
+## Architecture Overview
+
+Single-binary Rust desktop app, three layers:
+
+- **UI** (`egui` / `eframe`): dropzone → workspace (viewport, timeline scrubber, moments panel, tool palette)
+- **Extraction** (`ffmpeg-sidecar`): manages a portable ffmpeg binary; decodes video → PNG frames on disk
+- **Annotation model** (in-memory JSON): shapes stored per-frame; burned into pixels on export
+
+**Disk layout:**
+
+- Session dir: `~/.frammpeg/sessions/<timestamp>/`
+- Export dir: `<session>/export/moment-NN/` — buffer frames as clean PNGs, noted frame as `frame-NNNN-annotated.png` with shapes burned in, `note.md` per moment
+
+Full design record and rationale live in `bd show frmpg-0`.
+
 ---
 
 ## Bead / Tooling Instructions
