@@ -652,8 +652,37 @@ fn handle_trim_interaction(
         *trim_scroll_override = None;
     }
 
-    if start_resp.drag_stopped() || end_resp.drag_stopped() {
+    if start_resp.drag_stopped() {
+        if let Some(pos) = start_resp.interact_pointer_pos() {
+            let x = pos.x - content_rect.min.x - geom.left_pad;
+            let pitch = geom.pitch();
+            if pitch > 0.0 {
+                let strip_idx = (x / pitch).round().max(0.0) as usize;
+                let frame = strip_pos_to_frame(strip_idx, stride).min(last);
+                let clamped_hi = trim_end.saturating_sub(1);
+                *trim_start = frame.min(clamped_hi);
+            }
+        }
         action.trim_drag_stopped = true;
+        if trim_scroll_override.is_some() {
+            *trim_scroll_override = None;
+        }
+    }
+    if end_resp.drag_stopped() {
+        if let Some(pos) = end_resp.interact_pointer_pos() {
+            let x = pos.x - content_rect.min.x - geom.left_pad;
+            let pitch = geom.pitch();
+            if pitch > 0.0 {
+                let strip_idx = (x / pitch).round().max(0.0) as usize;
+                let frame = strip_pos_to_frame(strip_idx, stride).min(last);
+                let clamped_lo = trim_start.saturating_add(1);
+                *trim_end = frame.max(clamped_lo).min(last);
+            }
+        }
+        action.trim_drag_stopped = true;
+        if trim_scroll_override.is_some() {
+            *trim_scroll_override = None;
+        }
     }
 
     start_resp.hovered()
