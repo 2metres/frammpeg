@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use egui::{Color32, Ui, Vec2};
+use egui::{Align2, Color32, CornerRadius, Sense, Ui, Vec2};
 
 use crate::icons::{Icon, IconCache};
 use crate::theme;
@@ -36,14 +36,25 @@ pub struct TransportView {
 }
 
 /// Draw the centered transport button row. Returns the first pressed action.
-pub fn draw(ui: &mut Ui, icons: &mut IconCache, view: TransportView) -> Option<TransportAction> {
+pub fn draw(
+    ui: &mut Ui,
+    icons: &mut IconCache,
+    view: TransportView,
+    current_frame: usize,
+    total_frames: usize,
+) -> Option<TransportAction> {
     let mut action: Option<TransportAction> = None;
     let mut new_scale = view.strip_scale;
 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = BUTTON_GAP;
+
+        render_frame_badge(ui, current_frame + 1, total_frames);
+        ui.add_space(BUTTON_GAP);
+
         let pad = ((ui.available_width() - ROW_WIDTH) * 0.5).max(0.0);
         ui.add_space(pad);
+
         if step_button(
             ui,
             icons,
@@ -109,6 +120,30 @@ pub fn draw(ui: &mut Ui, icons: &mut IconCache, view: TransportView) -> Option<T
     });
 
     action
+}
+
+fn render_frame_badge(ui: &mut Ui, current: usize, total: usize) {
+    let text = format!("{} / {}", current, total.max(1));
+    let galley = ui.painter().layout_no_wrap(
+        text.clone(),
+        egui::FontId::monospace(12.0),
+        theme::TEXT_MUTED,
+    );
+    let size = galley.size() + Vec2::new(12.0, 6.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    let bg = if response.hovered() {
+        theme::WIDGET_HOVERED
+    } else {
+        theme::WIDGET_IDLE
+    };
+    ui.painter().rect_filled(rect, CornerRadius::same(4), bg);
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        &text,
+        egui::FontId::monospace(12.0),
+        theme::TEXT_MUTED,
+    );
 }
 
 fn step_button(
