@@ -37,6 +37,12 @@ pub enum Action {
         old: usize,
         new: usize,
     },
+    AnnotationTextChanged {
+        frame: usize,
+        index: usize,
+        old: String,
+        new: String,
+    },
 }
 
 impl Action {
@@ -44,9 +50,9 @@ impl Action {
     /// undo/redo when the affected annotation is on a different frame.
     pub fn affected_frame(&self, moments: &[Moment]) -> Option<usize> {
         match self {
-            Action::AnnotationCreated { frame, .. } | Action::AnnotationDeleted { frame, .. } => {
-                Some(*frame)
-            }
+            Action::AnnotationCreated { frame, .. }
+            | Action::AnnotationDeleted { frame, .. }
+            | Action::AnnotationTextChanged { frame, .. } => Some(*frame),
             Action::MomentCreated { moment, .. } | Action::MomentDeleted { moment, .. } => {
                 Some(moment.frame_index)
             }
@@ -96,6 +102,15 @@ impl Action {
                     m.buffer = *new;
                 }
             }
+            Action::AnnotationTextChanged {
+                frame, index, new, ..
+            } => {
+                if let Some(list) = state.annotations.get_mut(frame) {
+                    if let Some(Annotation::Text { text, .. }) = list.get_mut(*index) {
+                        *text = new.clone();
+                    }
+                }
+            }
         }
     }
 
@@ -137,6 +152,15 @@ impl Action {
             Action::MomentBufferChanged { index, old, .. } => {
                 if let Some(m) = state.moments.get_mut(*index) {
                     m.buffer = *old;
+                }
+            }
+            Action::AnnotationTextChanged {
+                frame, index, old, ..
+            } => {
+                if let Some(list) = state.annotations.get_mut(frame) {
+                    if let Some(Annotation::Text { text, .. }) = list.get_mut(*index) {
+                        *text = old.clone();
+                    }
                 }
             }
         }
@@ -421,6 +445,38 @@ mod tests {
 
         h.redo(&mut state(&mut anns, &mut moms)).unwrap();
         assert_eq!(moms[0].buffer, 12);
+    }
+
+    #[test]
+    fn annotation_text_changed_round_trip() {
+        let mut anns: HashMap<usize, Vec<Annotation>> = HashMap::new();
+        anns.insert(3, vec![text("Hello")]);
+        let mut moms: Vec<Moment> = Vec::new();
+        let mut h = History::new(HISTORY_CAP);
+
+        if let Some(Annotation::Text { text, .. }) = anns.get_mut(&3).and_then(|l| l.get_mut(0)) {
+            *text = "Hello World".into();
+        }
+        h.record(Action::AnnotationTextChanged {
+            frame: 3,
+            index: 0,
+            old: "Hello".into(),
+            new: "Hello World".into(),
+        });
+
+        h.undo(&mut state(&mut anns, &mut moms)).unwrap();
+        if let Some(Annotation::Text { text, .. }) = anns.get(&3).and_then(|l| l.first()) {
+            assert_eq!(text, "Hello");
+        } else {
+            panic!("annotation not found or not Text");
+        }
+
+        h.redo(&mut state(&mut anns, &mut moms)).unwrap();
+        if let Some(Annotation::Text { text, .. }) = anns.get(&3).and_then(|l| l.first()) {
+            assert_eq!(text, "Hello World");
+        } else {
+            panic!("annotation not found or not Text");
+        }
     }
 
     #[test]

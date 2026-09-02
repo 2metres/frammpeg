@@ -80,6 +80,7 @@ struct VideoState {
     history: History,
     note_edit: Option<NoteEditSnapshot>,
     buffer_edit: Option<BufferEditSnapshot>,
+    text_edit: Option<TextEditSnapshot>,
 }
 
 struct NoteEditSnapshot {
@@ -90,6 +91,12 @@ struct NoteEditSnapshot {
 struct BufferEditSnapshot {
     moment_index: usize,
     original: usize,
+}
+
+struct TextEditSnapshot {
+    frame: usize,
+    index: usize,
+    original: String,
 }
 
 impl VideoState {
@@ -134,6 +141,7 @@ impl VideoState {
             history: History::new(HISTORY_CAP),
             note_edit: None,
             buffer_edit: None,
+            text_edit: None,
         }
     }
 
@@ -201,22 +209,35 @@ impl VideoState {
                     }
                 } else {
                     *text = self.text_buffer.clone();
-                    let recorded = ann_list[idx].clone();
-                    self.history.record(Action::AnnotationCreated {
-                        frame,
-                        index: idx,
-                        annotation: recorded,
-                    });
+                    if let Some(snapshot) = self.text_edit.take() {
+                        if snapshot.original != self.text_buffer {
+                            self.history.record(Action::AnnotationTextChanged {
+                                frame: snapshot.frame,
+                                index: snapshot.index,
+                                old: snapshot.original,
+                                new: self.text_buffer.clone(),
+                            });
+                        }
+                    } else {
+                        let recorded = ann_list[idx].clone();
+                        self.history.record(Action::AnnotationCreated {
+                            frame,
+                            index: idx,
+                            annotation: recorded,
+                        });
+                    }
                 }
             }
             self.text_buffer.clear();
         }
+        self.text_edit = None;
     }
 
     fn after_history_change(&mut self, action: &Action) {
         self.drag = None;
         self.editing_text = None;
         self.text_buffer.clear();
+        self.text_edit = None;
         self.text_focus_pending = false;
         if let Some(sel) = self.selected_moment {
             if sel >= self.moments.len() {
@@ -924,6 +945,11 @@ impl FrammpegApp {
                         {
                             v.editing_text = Some(idx);
                             v.text_buffer = text.clone();
+                            v.text_edit = Some(TextEditSnapshot {
+                                frame: current,
+                                index: idx,
+                                original: text.clone(),
+                            });
                             v.text_focus_pending = true;
                         }
                     } else {
@@ -938,6 +964,7 @@ impl FrammpegApp {
                         });
                         v.editing_text = Some(list.len() - 1);
                         v.text_buffer.clear();
+                        v.text_edit = None;
                         v.text_focus_pending = true;
                     }
                 }
