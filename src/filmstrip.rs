@@ -10,6 +10,31 @@ use crate::thumbs::ThumbCache;
 pub const TRIM_HANDLE_W: f32 = 22.0;
 pub const TRIM_RAIL_H: f32 = 4.0;
 
+/// Distance from a viewport edge, in pixels, that triggers edge auto-scroll
+/// during a trim handle drag.
+pub const EDGE_DEAD_ZONE_PX: f32 = 40.0;
+
+/// Peak scroll speed when the pointer sits at the extreme edge of the
+/// filmstrip viewport during a trim handle drag.
+pub const MAX_SCROLL_SPEED_PX_PER_S: f32 = 400.0;
+
+/// Compute the scroll velocity (px/s, positive = scroll right) to apply to
+/// the filmstrip while a trim handle is being dragged near a viewport edge.
+/// Returns 0.0 when the pointer sits in the central "safe" zone.
+pub fn edge_scroll_velocity(pointer_x: f32, viewport_rect: Rect) -> f32 {
+    let left_edge = viewport_rect.min.x;
+    let right_edge = viewport_rect.max.x;
+    if pointer_x < left_edge + EDGE_DEAD_ZONE_PX {
+        let depth = (left_edge + EDGE_DEAD_ZONE_PX - pointer_x).clamp(0.0, EDGE_DEAD_ZONE_PX);
+        -MAX_SCROLL_SPEED_PX_PER_S * (depth / EDGE_DEAD_ZONE_PX)
+    } else if pointer_x > right_edge - EDGE_DEAD_ZONE_PX {
+        let depth = (pointer_x - (right_edge - EDGE_DEAD_ZONE_PX)).clamp(0.0, EDGE_DEAD_ZONE_PX);
+        MAX_SCROLL_SPEED_PX_PER_S * (depth / EDGE_DEAD_ZONE_PX)
+    } else {
+        0.0
+    }
+}
+
 /// Compute the minimal stride that fits the entire clip in the viewport.
 /// Returns the smallest stride where `ceil(total_frames / stride)` thumbs fit
 /// within `floor(viewport_width / pitch)` positions.
@@ -193,6 +218,12 @@ pub struct FilmstripDrawParams<'a> {
     pub thumbs: &'a mut ThumbCache,
     /// Accumulator for scroll-to-scrub, converted to frame steps.
     pub scroll_accumulator: &'a mut f32,
+    /// When `Some`, overrides the default current-frame-centered scroll offset
+    /// with this raw content-space value. Used to hold the auto-scrolled strip
+    /// position while a trim handle is being edge-dragged; the accumulator IS
+    /// the sub-pixel state (offset is a plain `f32`). Cleared to `None` when
+    /// the trim drag ends so the strip snaps back to centering `current_frame`.
+    pub trim_scroll_override: &'a mut Option<f32>,
     pub stride: usize,
 }
 
@@ -209,6 +240,7 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
         trim_end,
         thumbs,
         scroll_accumulator,
+        trim_scroll_override,
         stride,
     } = params;
 
@@ -235,12 +267,13 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
     let want_scroll = current_frame != prev_current_frame;
 
     let strip_pos = frame_to_strip_pos(current_frame, stride);
-    let target_offset = strip_pos as f32 * geom.pitch() + geom.thumb_w * 0.5;
+    let default_target_offset = strip_pos as f32 * geom.pitch() + geom.thumb_w * 0.5;
+    let scroll_offset = trim_scroll_override.unwrap_or(default_target_offset);
 
     ScrollArea::horizontal()
         .id_salt("frammpeg-filmstrip")
         .auto_shrink([false, false])
-        .horizontal_scroll_offset(target_offset)
+        .horizontal_scroll_offset(scroll_offset)
         .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
         .scroll_source(ScrollSource {
             scroll_bar: false,
@@ -308,18 +341,28 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
                 action.scroll_into_view = true;
             }
 
+            let screen_viewport = Rect::from_min_max(
+                content_rect.min + viewport.min.to_vec2(),
+                content_rect.min + viewport.max.to_vec2(),
+            );
+
             let mut handle_pointer_captured = false;
             if trim_enabled {
                 handle_pointer_captured = handle_trim_interaction(
                     ui,
                     content_rect,
+                    screen_viewport,
                     geom,
                     total_frames,
                     trim_start,
                     trim_end,
                     stride,
+                    content_width,
+                    trim_scroll_override,
                     &mut action,
                 );
+            } else if trim_scroll_override.is_some() {
+                *trim_scroll_override = None;
             }
 
             if !handle_pointer_captured {
@@ -524,11 +567,14 @@ fn paint_trim_handle(painter: &egui::Painter, rect: Rect, hovered_or_dragged: bo
 fn handle_trim_interaction(
     ui: &mut Ui,
     content_rect: Rect,
+    screen_viewport: Rect,
     geom: FilmstripGeometry,
     total_frames: usize,
     trim_start: &mut usize,
     trim_end: &mut usize,
     stride: usize,
+    content_width: f32,
+    trim_scroll_override: &mut Option<f32>,
     action: &mut FilmstripAction,
 ) -> bool {
     let last = total_frames.saturating_sub(1);
@@ -584,6 +630,26 @@ fn handle_trim_interaction(
                 *trim_end = frame.max(clamped_lo).min(last);
             }
         }
+    }
+
+    let is_dragging = start_resp.dragged() || end_resp.dragged();
+    if is_dragging {
+        let pointer_pos = start_resp
+            .interact_pointer_pos()
+            .or_else(|| end_resp.interact_pointer_pos());
+        if let Some(pos) = pointer_pos {
+            let velocity = edge_scroll_velocity(pos.x, screen_viewport);
+            if velocity != 0.0 {
+                let dt = ui.input(|i| i.stable_dt).clamp(0.0, 0.1);
+                let current = trim_scroll_override
+                    .unwrap_or((screen_viewport.min.x - content_rect.min.x).max(0.0));
+                let new_offset = (current + velocity * dt).clamp(0.0, content_width.max(0.0));
+                *trim_scroll_override = Some(new_offset);
+                ui.ctx().request_repaint();
+            }
+        }
+    } else if trim_scroll_override.is_some() {
+        *trim_scroll_override = None;
     }
 
     if start_resp.drag_stopped() || end_resp.drag_stopped() {
@@ -812,5 +878,31 @@ mod tests {
         assert_eq!(strip_pos_to_frame(12, 10), 120);
         assert_eq!(strip_pos_to_frame(0, 10), 0);
         assert_eq!(strip_pos_to_frame(5, 1), 5);
+    }
+
+    #[test]
+    fn edge_scroll_velocity_maps_pointer_to_direction_and_speed() {
+        let viewport = Rect::from_min_max(Pos2::new(100.0, 0.0), Pos2::new(500.0, 40.0));
+
+        // Pointer past the left edge: fastest negative scroll (leftward).
+        let v_left = edge_scroll_velocity(viewport.min.x - 10.0, viewport);
+        assert!((v_left - -MAX_SCROLL_SPEED_PX_PER_S).abs() < 0.001);
+
+        // Pointer at the center: no scrolling.
+        let center = (viewport.min.x + viewport.max.x) * 0.5;
+        assert_eq!(edge_scroll_velocity(center, viewport), 0.0);
+
+        // Pointer past the right edge: fastest positive scroll (rightward).
+        let v_right = edge_scroll_velocity(viewport.max.x + 10.0, viewport);
+        assert!((v_right - MAX_SCROLL_SPEED_PX_PER_S).abs() < 0.001);
+
+        // Pointer half-way into the left dead-zone: half-speed leftward.
+        let half_left = viewport.min.x + EDGE_DEAD_ZONE_PX * 0.5;
+        let v_half_left = edge_scroll_velocity(half_left, viewport);
+        assert!((v_half_left - -MAX_SCROLL_SPEED_PX_PER_S * 0.5).abs() < 0.001);
+
+        // Pointer exactly at the dead-zone boundary: zero velocity.
+        let boundary = viewport.min.x + EDGE_DEAD_ZONE_PX;
+        assert_eq!(edge_scroll_velocity(boundary, viewport), 0.0);
     }
 }
