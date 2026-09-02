@@ -88,6 +88,16 @@ Or use the wrapper script:
 scripts/check-unused.sh
 ```
 
+## Git Hooks
+
+To install pre-commit hooks (cargo fmt --check, cargo clippy), run once per clone:
+
+```bash
+./scripts/install-hooks.sh
+```
+
+This requires lefthook (`brew install lefthook` or `cargo install lefthook`). The install script will prompt if lefthook is not found.
+
 ## Architecture Overview
 
 Single-binary Rust desktop app, three layers:
