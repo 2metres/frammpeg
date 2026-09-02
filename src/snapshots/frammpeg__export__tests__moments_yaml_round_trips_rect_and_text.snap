@@ -1,0 +1,29 @@
+---
+source: src/export.rs
+expression: normalized
+---
+export:
+  timestamp: <redacted>
+  source_range:
+  - 1
+  - 1
+  total_frames: 1
+  video: shapes.mp4
+moments:
+- frame: 1
+  buffer: 0
+  note: both shapes
+  annotations:
+  - type: rect
+    x: 1.0
+    "y": 2.0
+    w: 3.0
+    h: 4.0
+    stroke: "#AABBCC"
+    stroke_width: 2.5
+  - type: text
+    x: 5.0
+    "y": 6.0
+    text: label
+    font_size: 14.0
+    color: "#11223344"
