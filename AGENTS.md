@@ -1,4 +1,62 @@
-# Agent Instructions
+# Frammpeg — Agent Instructions
+
+## About Frammpeg
+
+**Frammpeg** is a portable Rust desktop tool for debugging HTML/CSS animation bugs. A user records a buggy animation, drops the video into Frammpeg, scrubs frame-by-frame, marks "notable" frames, annotates them with shapes and notes, and exports the annotated frames to disk. They then paste the export path into an AI assistant chat and the assistant reads the PNGs to help diagnose.
+
+Frammpeg is deliberately not an MCP server, not a plugin, and has no built-in AI integration. The human is the courier between Frammpeg and the assistant.
+
+**Forever-lived vision and design record:**
+
+```bash
+bd show frmpg-0
+```
+
+That epic ticket carries the workflow, stack decisions, alternatives considered (and why rejected), the export directory layout, and the non-goals list. Read it before making architectural choices.
+
+**Stack:**
+
+- Rust
+- [egui](https://github.com/emilk/egui) via `eframe` for the UI
+- [ffmpeg-sidecar](https://github.com/nathanbabcock/ffmpeg-sidecar) for portable frame extraction
+
+Single portable binary. No `brew install ffmpeg` prerequisite.
+
+**Current status:** pre-alpha. `frmpg-0.bootstrap` is the next actionable ticket — project scaffold and shell.
+
+**Conventions:**
+
+- All task tracking in `bd`. Sub-issues use dot-notation (`frmpg-0.bootstrap`, `frmpg-0.mvp`, etc).
+- Non-goals in `frmpg-0` are load-bearing — challenge scope that contradicts them before adding it.
+- Portability is a requirement; anything assuming a system dependency needs a portable replacement path called out.
+- Rust style: `cargo fmt`, `cargo clippy -- -D warnings` clean.
+
+## Build & Test
+
+```bash
+cargo run --release           # launch the desktop app
+cargo test                    # unit tests
+cargo clippy -- -D warnings   # lint
+```
+
+## Architecture Overview
+
+Single-binary Rust desktop app, three layers:
+
+- **UI** (`egui` / `eframe`): dropzone → workspace (viewport, timeline scrubber, moments panel, tool palette)
+- **Extraction** (`ffmpeg-sidecar`): manages a portable ffmpeg binary; decodes video → PNG frames on disk
+- **Annotation model** (in-memory JSON): shapes stored per-frame; burned into pixels on export
+
+**Disk layout:**
+
+- Session dir: `~/.frammpeg/sessions/<timestamp>/`
+- Export dir: `<session>/export/moment-NN/` — buffer frames as clean PNGs, noted frame as `frame-NNNN-annotated.png` with shapes burned in, `note.md` per moment
+
+Full design record and rationale live in `bd show frmpg-0`.
+
+---
+
+## Bead / Tooling Instructions
 
 This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
 

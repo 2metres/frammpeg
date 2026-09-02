@@ -1,6 +1,6 @@
-# Project Instructions for AI Agents
+# Frammpeg — Instructions for Claude Code
 
-This file provides instructions and context for AI coding agents working on this project.
+Read `./AGENTS.md` first — it holds the shared instructions that apply to every coding agent working on this project (About Frammpeg, Bead / tooling instructions, Non-Interactive Shell Commands, Agent Context Profiles, Subagent Roles, Session Completion, Build & Test, Architecture Overview). The rules below are Claude Code-specific and apply on top of it.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->
 ## Beads Issue Tracker
@@ -57,21 +57,6 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
 
+## Claude Code-Specific Rules
 
-## Build & Test
-
-_Add your build and test commands here_
-
-```bash
-# Example:
-# npm install
-# npm test
-```
-
-## Architecture Overview
-
-_Add a brief overview of your project architecture_
-
-## Conventions & Patterns
-
-_Add your project-specific conventions here_
+_None yet. Add here when Claude Code needs different behavior than the shared AGENTS.md rules — skill preferences, subagent conventions specific to this harness, hook configurations, etc._

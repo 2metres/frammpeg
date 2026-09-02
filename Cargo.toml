@@ -20,6 +20,9 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 imageproc = { version = "0.27.0", default-features = false, features = ["text"] }
 ab_glyph = "0.2"
+resvg = { version = "0.48.1", default-features = false }
+usvg = { version = "0.48.1", default-features = false }
+tiny-skia = "0.12.0"
 
 [profile.release]
 lto = "thin"

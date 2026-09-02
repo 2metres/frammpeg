@@ -7,6 +7,7 @@ mod extract;
 mod filmstrip;
 mod fonts;
 mod history;
+mod icons;
 mod model;
 mod session;
 mod theme;
