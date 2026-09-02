@@ -33,8 +33,8 @@ pub struct FilmstripGeometry {
 impl Default for FilmstripGeometry {
     fn default() -> Self {
         Self {
-            thumb_w: 80.0,
-            thumb_h: 112.0,
+            thumb_w: 96.0,
+            thumb_h: 96.0,
             gap: 4.0,
             top_pad: 4.0,
             label_h: 14.0,
@@ -544,11 +544,11 @@ mod tests {
 
     #[test]
     fn visible_range_covers_viewport() {
-        let g = geom(); // pitch = 84
+        let g = geom(); // pitch = 100
         let (lo, hi) = g.visible_range(0.0, 200.0, 100).unwrap();
         assert_eq!(lo, 0);
-        // 200 / 84 ~ 2.38 -> ceil = 3, so at least index 2 is visible.
-        assert!(hi >= 2);
+        // 200 / 100 = 2.0 -> ceil = 2, so at least index 1 is visible.
+        assert!(hi >= 1);
     }
 
     #[test]
@@ -561,11 +561,11 @@ mod tests {
 
     #[test]
     fn visible_range_starts_mid_strip() {
-        let g = geom(); // pitch = 84
+        let g = geom(); // pitch = 100
         let (lo, hi) = g.visible_range(200.0, 400.0, 100).unwrap();
-        // 200 / 84 ~ 2.38 -> floor 2
+        // 200 / 100 = 2.0 -> floor 2
         assert_eq!(lo, 2);
-        assert!(hi >= 4);
+        assert!(hi >= 3);
     }
 
     #[test]
@@ -598,8 +598,8 @@ mod tests {
     fn total_width_matches_pitch_math() {
         let g = geom();
         let w = g.total_width(10);
-        // 10 * 84 - 4 = 836
-        assert!((w - 836.0).abs() < 0.001);
+        // 10 * 100 - 4 = 996
+        assert!((w - 996.0).abs() < 0.001);
     }
 
     #[test]
@@ -610,16 +610,16 @@ mod tests {
 
     #[test]
     fn trim_handle_rect_centered_on_thumb_boundary() {
-        let g = geom(); // pitch 84, thumb_w 80
+        let g = geom(); // pitch 100, thumb_w 96
         let origin = Pos2::new(0.0, 0.0);
         let start = g.trim_handle_rect(origin, 3, TrimHandle::Start);
-        // Start handle is centered on thumb.left() = 3 * 84 = 252.
-        assert!((start.center().x - 252.0).abs() < 0.001);
+        // Start handle is centered on thumb.left() = 3 * 100 = 300.
+        assert!((start.center().x - 300.0).abs() < 0.001);
         assert!((start.width() - TRIM_HANDLE_W).abs() < 0.001);
 
         let end = g.trim_handle_rect(origin, 3, TrimHandle::End);
-        // End handle is centered on thumb.right() = 3 * 84 + 80 = 332.
-        assert!((end.center().x - 332.0).abs() < 0.001);
+        // End handle is centered on thumb.right() = 3 * 100 + 96 = 396.
+        assert!((end.center().x - 396.0).abs() < 0.001);
     }
 
     #[test]
@@ -651,7 +651,7 @@ mod tests {
     fn x_to_frame_snaps_to_thumb_at_start() {
         let g = geom();
         assert_eq!(g.x_to_frame(0.0, 100), 0);
-        // Pointer just inside thumb 3 (3 * pitch = 252, +5 -> still index 3).
+        // Pointer just inside thumb 3 (3 * pitch = 300, +5 -> still index 3).
         assert_eq!(g.x_to_frame(3.0 * g.pitch() + 5.0, 100), 3);
     }
 

@@ -10,8 +10,8 @@ use egui::{ColorImage, TextureHandle, TextureOptions};
 
 use crate::session;
 
-pub const DEFAULT_THUMB_W: u32 = 80;
-pub const DEFAULT_THUMB_H: u32 = 60;
+pub const DEFAULT_THUMB_W: u32 = 96;
+pub const DEFAULT_THUMB_H: u32 = 96;
 pub const DEFAULT_CAPACITY: usize = 200;
 
 /// LRU state without any texture upload — factored out so the eviction logic
@@ -192,7 +192,9 @@ fn decode_worker(
                 let Ok(img) = image::open(&path) else {
                     continue;
                 };
-                let thumb = img.thumbnail(thumb_w, thumb_h).to_rgba8();
+                let thumb = img
+                    .resize_to_fill(thumb_w, thumb_h, image::imageops::FilterType::Lanczos3)
+                    .to_rgba8();
                 let (w, h) = (thumb.width() as usize, thumb.height() as usize);
                 let color = ColorImage::from_rgba_unmultiplied([w, h], thumb.as_raw());
                 if resp_tx
@@ -268,11 +270,11 @@ mod tests {
         assert!(lru.contains(&1));
     }
 
-    /// Decode a fixture PNG through the same `image::open(...).thumbnail(...)`
-    /// path the worker thread uses, and confirm the resize aspect-fits inside
-    /// the requested bounds.
+    /// Decode a fixture PNG through the same `resize_to_fill` path the worker
+    /// thread uses, and confirm the output is exactly the requested square
+    /// (fill/cover crop).
     #[test]
-    fn thumbnail_decode_aspect_fits() {
+    fn thumbnail_decode_fill_covers() {
         let tmp = std::env::temp_dir().join(format!(
             "frammpeg-thumb-{}-{}",
             std::process::id(),
@@ -282,23 +284,17 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&tmp).unwrap();
-        // 16:9 fixture. Thumbnail bounds 80x60 -> width should hit 80, height
-        // proportional and <= 60.
+        // 16:9 fixture. resize_to_fill(96, 96) should crop to exactly 96x96.
         let src = image::RgbaImage::from_pixel(160, 90, image::Rgba([120, 200, 90, 255]));
         let path = tmp.join("frame-0001.png");
         src.save(&path).unwrap();
 
         let img = image::open(&path).unwrap();
-        let thumb = img.thumbnail(80, 60).to_rgba8();
-        assert!(thumb.width() <= 80);
-        assert!(thumb.height() <= 60);
-        assert!(thumb.width() >= 40, "expected reasonable width");
-        // Aspect ratio (roughly) preserved from 16:9.
-        let ratio = thumb.width() as f32 / thumb.height() as f32;
-        assert!(
-            (ratio - 16.0 / 9.0).abs() < 0.2,
-            "aspect not preserved: {ratio}"
-        );
+        let thumb = img
+            .resize_to_fill(96, 96, image::imageops::FilterType::Lanczos3)
+            .to_rgba8();
+        assert_eq!(thumb.width(), 96);
+        assert_eq!(thumb.height(), 96);
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
