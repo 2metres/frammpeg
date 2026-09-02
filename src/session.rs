@@ -16,7 +16,6 @@ pub fn ensure_sessions_root() -> io::Result<PathBuf> {
 }
 
 pub struct SessionDirs {
-    #[allow(dead_code)]
     pub root: PathBuf,
     pub frames: PathBuf,
     pub export: PathBuf,

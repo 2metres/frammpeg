@@ -488,6 +488,14 @@ impl FrammpegApp {
                         .color(theme::TEXT_MUTED)
                         .small(),
                 );
+                if let Phase::Ready(v) = &self.phase {
+                    ui.separator();
+                    ui.label(
+                        RichText::new(v.session.root.display().to_string())
+                            .color(theme::TEXT_MUTED)
+                            .small(),
+                    );
+                }
             });
         });
     }
