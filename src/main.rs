@@ -32,7 +32,9 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_title("Frammpeg")
             .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([960.0, 600.0]),
+            .with_min_inner_size([960.0, 600.0])
+            .with_titlebar_shown(false)
+            .with_fullsize_content_view(true),
         ..Default::default()
     };
 
