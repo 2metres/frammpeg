@@ -839,14 +839,15 @@ impl FrammpegApp {
                 };
                 let in_range = v.in_trim(frame_index);
                 let header = format!("Frame {}", frame_index + 1);
-                let mut label_text =
-                    RichText::new(format!("{header}\n{note_preview}"));
-                if in_range {
-                    label_text = label_text.color(theme::TEXT);
-                } else {
-                    label_text = label_text.color(theme::TEXT_MUTED).italics();
+                let color = if selected { theme::TEXT } else { theme::TEXT_MUTED };
+                let mut label_text = RichText::new(format!("{header}\n{note_preview}")).color(color);
+                if !in_range {
+                    label_text = label_text.italics();
                 }
-                let response = ui.selectable_label(selected, label_text);
+                let response = ui.add(
+                    egui::Label::new(label_text)
+                        .sense(Sense::click())
+                );
                 let response = if in_range {
                     response
                 } else {
@@ -863,18 +864,21 @@ impl FrammpegApp {
                 }
                 if selected {
                     ui.add_space(4.0);
+                    let max_w = ui.available_width();
                     if let Some(texture) = v.thumbs.get(frame_index) {
                         let response = ui.add(
                             egui::Image::from_texture(&texture)
-                                .fit_to_exact_size(Vec2::new(180.0, 180.0))
+                                .max_width(max_w)
+                                .maintain_aspect_ratio(true)
                                 .sense(Sense::click()),
                         );
                         if response.clicked() {
                             jump_to = Some(frame_index);
                         }
                     } else {
+                        let fallback_h = max_w * 9.0 / 16.0;
                         let (rect, _) =
-                            ui.allocate_exact_size(Vec2::new(180.0, 180.0), Sense::hover());
+                            ui.allocate_exact_size(Vec2::new(max_w, fallback_h), Sense::hover());
                         ui.painter().rect_filled(
                             rect,
                             CornerRadius::same(4),
