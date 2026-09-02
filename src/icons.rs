@@ -12,6 +12,8 @@ const CHEVRONS_RIGHT: &[u8] = include_bytes!("../assets/icons/chevrons-right.svg
 const SKIP_FORWARD: &[u8] = include_bytes!("../assets/icons/skip-forward.svg");
 const SQUARE: &[u8] = include_bytes!("../assets/icons/square.svg");
 const TYPE: &[u8] = include_bytes!("../assets/icons/type.svg");
+const SCISSORS: &[u8] = include_bytes!("../assets/icons/scissors.svg");
+const BOOKMARK: &[u8] = include_bytes!("../assets/icons/bookmark.svg");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
@@ -25,6 +27,8 @@ pub enum Icon {
     SkipForward,
     Rectangle,
     Text,
+    Scissors,
+    Bookmark,
 }
 
 impl Icon {
@@ -40,6 +44,8 @@ impl Icon {
             Icon::SkipForward => SKIP_FORWARD,
             Icon::Rectangle => SQUARE,
             Icon::Text => TYPE,
+            Icon::Scissors => SCISSORS,
+            Icon::Bookmark => BOOKMARK,
         }
     }
 
@@ -55,6 +61,8 @@ impl Icon {
             Icon::SkipForward => "skip-forward",
             Icon::Rectangle => "square",
             Icon::Text => "type",
+            Icon::Scissors => "scissors",
+            Icon::Bookmark => "bookmark",
         }
     }
 }
@@ -100,14 +108,15 @@ impl IconCache {
         size_pt: f32,
         color: Color32,
         min_size: Vec2,
+        frame: bool,
     ) -> Response {
         let ctx = ui.ctx().clone();
         match self.texture(&ctx, icon, size_pt, color) {
             Some(tex) => {
                 let image = egui::Image::from_texture(&tex).fit_to_exact_size(Vec2::splat(size_pt));
-                ui.add(Button::image(image).min_size(min_size))
+                ui.add(Button::image(image).min_size(min_size).frame(frame))
             }
-            None => ui.add(Button::new(icon.name()).min_size(min_size)),
+            None => ui.add(Button::new(icon.name()).min_size(min_size).frame(frame)),
         }
     }
 }
@@ -234,6 +243,8 @@ mod tests {
             Icon::SkipForward,
             Icon::Rectangle,
             Icon::Text,
+            Icon::Scissors,
+            Icon::Bookmark,
         ];
         let opt = usvg::Options::default();
         for icon in icons {

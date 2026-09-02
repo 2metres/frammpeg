@@ -11,12 +11,12 @@ use egui::{
 };
 
 use crate::extract::{spawn_extraction, ExtractEvent};
-use crate::filmstrip::{self, FilmstripDrawParams, FilmstripGeometry};
+use crate::filmstrip::{self, FilmstripDrawParams, FilmstripGeometry, TrimHandle};
 use crate::history::{Action, History, HistoryState, HISTORY_CAP};
 use crate::icons::{Icon, IconCache};
 use crate::model::{
-    Annotation, Moment, DEFAULT_FONT_SIZE, DEFAULT_STROKE_RGBA, DEFAULT_STROKE_WIDTH,
-    DEFAULT_TEXT_RGBA, MAX_BUFFER,
+    Annotation, Moment, DEFAULT_BUFFER, DEFAULT_FONT_SIZE, DEFAULT_STROKE_RGBA,
+    DEFAULT_STROKE_WIDTH, DEFAULT_TEXT_RGBA, MAX_BUFFER,
 };
 use crate::session::{self, SessionDirs};
 use crate::thumbs::{self, ThumbCache};
@@ -37,7 +37,7 @@ fn tool_button(
     selected: bool,
 ) -> egui::Response {
     let color = if selected { theme::ACCENT } else { theme::TEXT };
-    icons.ui(ui, icon, TOOL_ICON_PT, color, TOOL_BUTTON_SIZE)
+    icons.ui(ui, icon, TOOL_ICON_PT, color, TOOL_BUTTON_SIZE, false)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +79,7 @@ struct VideoState {
     annotations: HashMap<usize, Vec<Annotation>>,
     moments: Vec<Moment>,
     selected_moment: Option<usize>,
+    moments_panel_open: bool,
     tool: Tool,
     drag: Option<DragRect>,
     editing_text: Option<usize>,
@@ -94,6 +95,13 @@ struct VideoState {
     note_edit: Option<NoteEditSnapshot>,
     buffer_edit: Option<BufferEditSnapshot>,
     text_edit: Option<TextEditSnapshot>,
+    trim_mode: bool,
+    trim_start: usize,
+    trim_end: usize,
+    trim_edit: Option<TrimEditSnapshot>,
+    scroll_accumulator: f32,
+    strip_stride: usize,
+    strip_scale: f32,
 }
 
 struct NoteEditSnapshot {
@@ -112,6 +120,12 @@ struct TextEditSnapshot {
     original: String,
 }
 
+struct TrimEditSnapshot {
+    #[allow(dead_code)]
+    which: TrimHandle,
+    original: (usize, usize),
+}
+
 impl VideoState {
     fn new(
         session: SessionDirs,
@@ -127,6 +141,7 @@ impl VideoState {
             thumbs::DEFAULT_THUMB_H,
             ctx.clone(),
         );
+        let trim_end = total_frames.saturating_sub(1);
         Self {
             session,
             video_path,
@@ -140,6 +155,7 @@ impl VideoState {
             annotations: HashMap::new(),
             moments: Vec::new(),
             selected_moment: None,
+            moments_panel_open: false,
             tool: Tool::Rect,
             drag: None,
             editing_text: None,
@@ -155,7 +171,22 @@ impl VideoState {
             note_edit: None,
             buffer_edit: None,
             text_edit: None,
+            trim_mode: false,
+            trim_start: 0,
+            trim_end,
+            trim_edit: None,
+            scroll_accumulator: 0.0,
+            strip_stride: 1,
+            strip_scale: 1.0,
         }
+    }
+
+    fn trim_enabled(&self) -> bool {
+        self.trim_mode && self.total_frames >= 2 && self.trim_end > self.trim_start
+    }
+
+    fn in_trim(&self, frame: usize) -> bool {
+        !self.trim_enabled() || (frame >= self.trim_start && frame <= self.trim_end)
     }
 
     fn seek(&mut self, target: usize) {
@@ -171,11 +202,18 @@ impl VideoState {
         if self.playing == playing {
             return;
         }
-        self.playing = playing;
         if playing {
+            // Refuse to start playback from outside the trim range — the user
+            // may have scrubbed there deliberately to peek; requiring a seek
+            // back into range is safer than snapping.
+            if self.trim_enabled() && !self.in_trim(self.current_frame) {
+                return;
+            }
+            self.playing = true;
             self.last_play_tick = Some(Instant::now());
             self.play_leftover = Duration::ZERO;
         } else {
+            self.playing = false;
             self.last_play_tick = None;
             self.play_leftover = Duration::ZERO;
         }
@@ -193,8 +231,12 @@ impl VideoState {
         let elapsed = now.duration_since(prev) + self.play_leftover;
         let (frames, leftover) = transport::advance_frames(self.fps, elapsed);
         if frames > 0 {
-            let (next, hit_end) =
-                transport::step_play(self.current_frame, frames, self.total_frames);
+            let range_end = if self.trim_enabled() {
+                self.trim_end
+            } else {
+                self.total_frames - 1
+            };
+            let (next, hit_end) = transport::step_play_to(self.current_frame, frames, range_end);
             if next != self.current_frame {
                 self.commit_text_edit();
                 self.current_frame = next;
@@ -233,6 +275,7 @@ impl VideoState {
                         }
                     } else {
                         let recorded = ann_list[idx].clone();
+                        self.auto_mark_if_first_annotation(frame);
                         self.history.record(Action::AnnotationCreated {
                             frame,
                             index: idx,
@@ -246,16 +289,37 @@ impl VideoState {
         self.text_edit = None;
     }
 
+    fn auto_mark_if_first_annotation(&mut self, frame: usize) {
+        if self.moments.iter().any(|m| m.frame_index == frame) {
+            return;
+        }
+        let moment = Moment {
+            frame_index: frame,
+            buffer: DEFAULT_BUFFER,
+            note: String::new(),
+        };
+        let index = self.moments.len();
+        self.moments.push(moment.clone());
+        self.moments_panel_open = true;
+        self.history.record(Action::MomentCreated { index, moment });
+    }
+
     fn after_history_change(&mut self, action: &Action) {
         self.drag = None;
         self.editing_text = None;
         self.text_buffer.clear();
         self.text_edit = None;
         self.text_focus_pending = false;
+        // Undo/redo may have swapped trim values out from under a pending drag
+        // snapshot; drop it so the next drag records a fresh baseline.
+        self.trim_edit = None;
         if let Some(sel) = self.selected_moment {
             if sel >= self.moments.len() {
                 self.selected_moment = None;
             }
+        }
+        if matches!(action, Action::MomentCreated { .. }) {
+            self.moments_panel_open = true;
         }
         if matches!(
             action,
@@ -292,6 +356,29 @@ impl VideoState {
                 }
             }
         }
+        if let Some(snap) = self.trim_edit.take() {
+            let new = (self.trim_start, self.trim_end);
+            if new != snap.original {
+                self.history.record(Action::TrimChanged {
+                    old: snap.original,
+                    new,
+                });
+            }
+        }
+    }
+
+    fn reset_trim(&mut self) {
+        if self.total_frames == 0 {
+            return;
+        }
+        self.finalize_pending_edits();
+        let old = (self.trim_start, self.trim_end);
+        let new = (0usize, self.total_frames - 1);
+        if old != new {
+            self.trim_start = new.0;
+            self.trim_end = new.1;
+            self.history.record(Action::TrimChanged { old, new });
+        }
     }
 
     fn ensure_frame_texture(&mut self, ctx: &egui::Context, index: usize) -> Option<TextureHandle> {
@@ -325,6 +412,7 @@ pub struct FrammpegApp {
     sessions_root: Option<PathBuf>,
     phase: Phase,
     icons: IconCache,
+    last_title: String,
 }
 
 impl FrammpegApp {
@@ -335,6 +423,7 @@ impl FrammpegApp {
             sessions_root,
             phase: Phase::Empty,
             icons: IconCache::new(),
+            last_title: String::new(),
         }
     }
 
@@ -403,44 +492,10 @@ impl FrammpegApp {
         ctx.request_repaint_after(Duration::from_millis(100));
     }
 
-    fn header_label(&self) -> String {
-        match &self.phase {
-            Phase::Empty => "no video loaded".into(),
-            Phase::Extracting(s) => {
-                let name = s
-                    .video_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "video".into());
-                if s.preparing {
-                    format!("{name}  -  preparing ffmpeg...")
-                } else {
-                    format!("{name}  -  extracting frame {}", s.current)
-                }
-            }
-            Phase::Ready(v) => {
-                let name = v
-                    .video_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "video".into());
-                format!(
-                    "{name}  -  frame {}/{}",
-                    v.current_frame + 1,
-                    v.total_frames
-                )
-            }
-            Phase::Error(msg) => format!("error: {msg}"),
-        }
-    }
-
     fn toolbar(&mut self, ui: &mut egui::Ui) {
-        let header = self.header_label();
         let Self { phase, icons, .. } = self;
         ui.horizontal(|ui| {
             ui.add_space(4.0);
-            ui.label(RichText::new("Frammpeg").color(theme::TEXT).strong());
-            ui.separator();
 
             if let Phase::Ready(v) = phase {
                 let mut tool = v.tool;
@@ -460,33 +515,68 @@ impl FrammpegApp {
                 v.tool = tool;
 
                 ui.separator();
-                if ui
-                    .button("Mark notable")
-                    .on_hover_text("Add the current frame to Moments")
+                let moments_count = v.moments.len();
+                let moments_label = if moments_count > 0 && !v.moments_panel_open {
+                    format!("{}", moments_count)
+                } else {
+                    String::new()
+                };
+                let moments_tooltip = if v.moments_panel_open {
+                    "Hide moments panel"
+                } else {
+                    "Show moments panel"
+                };
+                if tool_button(ui, icons, Icon::Bookmark, v.moments_panel_open)
+                    .on_hover_text(moments_tooltip)
                     .clicked()
                 {
-                    v.finalize_pending_edits();
-                    let frame = v.current_frame;
-                    if !v.moments.iter().any(|m| m.frame_index == frame) {
-                        let moment = Moment::new(frame);
-                        let index = v.moments.len();
-                        v.moments.push(moment.clone());
-                        v.history.record(Action::MomentCreated { index, moment });
+                    v.moments_panel_open = !v.moments_panel_open;
+                }
+                if !moments_label.is_empty() {
+                    ui.label(
+                        RichText::new(moments_label)
+                            .small()
+                            .color(theme::TEXT_MUTED),
+                    );
+                }
+
+                ui.separator();
+                if tool_button(ui, icons, Icon::Scissors, v.trim_mode)
+                    .on_hover_text(
+                        "Enable trim mode — gate the active frame range with yellow handles",
+                    )
+                    .clicked()
+                {
+                    v.trim_mode = !v.trim_mode;
+                }
+
+                if v.trim_mode {
+                    let reset_enabled = v.total_frames > 0
+                        && (v.trim_start != 0 || v.trim_end + 1 != v.total_frames);
+                    let reset_response =
+                        ui.add_enabled(reset_enabled, egui::Button::new("Reset trim").frame(false));
+                    if reset_response
+                        .on_hover_text("Reset the yellow trim handles to the full clip")
+                        .clicked()
+                    {
+                        v.reset_trim();
                     }
-                    v.selected_moment = v.moments.iter().position(|m| m.frame_index == frame);
                 }
 
                 ui.separator();
                 if ui
-                    .button("Export")
+                    .add(egui::Button::new("Export").frame(false))
                     .on_hover_text("Write each moment's buffer + annotated frame to disk")
                     .clicked()
                 {
                     v.commit_text_edit();
+                    v.finalize_pending_edits();
                     match export::export_all(
                         &v.moments,
                         &v.annotations,
                         v.total_frames,
+                        v.trim_start,
+                        v.trim_end,
                         &v.session.frames,
                         &v.session.export,
                     ) {
@@ -503,7 +593,7 @@ impl FrammpegApp {
                     }
                 }
                 if ui
-                    .button("Copy export path")
+                    .add(egui::Button::new("Copy export path").frame(false))
                     .on_hover_text("Copy the export folder path to the clipboard")
                     .clicked()
                 {
@@ -517,18 +607,6 @@ impl FrammpegApp {
                     }
                 }
             }
-
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.label(RichText::new(&header).color(theme::TEXT_MUTED).small());
-                if let Phase::Ready(v) = &*phase {
-                    ui.separator();
-                    ui.label(
-                        RichText::new(v.session.root.display().to_string())
-                            .color(theme::TEXT_MUTED)
-                            .small(),
-                    );
-                }
-            });
         });
     }
 
@@ -548,7 +626,7 @@ impl FrammpegApp {
     fn draw_bottom_panel_ready(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
 
-        let (enabled, playing, current_frame, prev_current_frame, total_frames) = {
+        let (enabled, playing, current_frame, prev_current_frame, total_frames, strip_scale) = {
             let Phase::Ready(v) = &self.phase else {
                 return;
             };
@@ -558,6 +636,7 @@ impl FrammpegApp {
                 v.current_frame,
                 v.prev_current_frame,
                 v.total_frames,
+                v.strip_scale,
             )
         };
 
@@ -566,7 +645,15 @@ impl FrammpegApp {
             let icons = &mut self.icons;
             let action = ui
                 .allocate_ui(Vec2::new(ui.available_width(), TRANSPORT_ROW_H), |ui| {
-                    transport::draw(ui, icons, TransportView { enabled, playing })
+                    transport::draw(
+                        ui,
+                        icons,
+                        TransportView {
+                            enabled,
+                            playing,
+                            strip_scale,
+                        },
+                    )
                 })
                 .inner;
             if let Some(a) = action {
@@ -579,6 +666,15 @@ impl FrammpegApp {
             let strip_top = ui.cursor().top();
             if let Phase::Ready(v) = &mut self.phase {
                 v.thumbs.poll(&ctx);
+                let viewport_width = ui.available_width();
+                let pitch = v.filmstrip_geom.pitch();
+                let stride = filmstrip::stride_from_scale(
+                    v.strip_scale,
+                    v.total_frames,
+                    viewport_width,
+                    pitch,
+                );
+                v.strip_stride = stride;
                 let action = filmstrip::draw(
                     ui,
                     FilmstripDrawParams {
@@ -586,9 +682,31 @@ impl FrammpegApp {
                         total_frames: v.total_frames,
                         current_frame: v.current_frame,
                         prev_current_frame,
+                        trim_mode: v.trim_mode,
+                        trim_start: &mut v.trim_start,
+                        trim_end: &mut v.trim_end,
                         thumbs: &mut v.thumbs,
+                        scroll_accumulator: &mut v.scroll_accumulator,
+                        stride,
                     },
                 );
+                if let Some(which) = action.trim_drag_started {
+                    v.trim_edit = Some(TrimEditSnapshot {
+                        which,
+                        original: (v.trim_start, v.trim_end),
+                    });
+                }
+                if action.trim_drag_stopped {
+                    if let Some(snap) = v.trim_edit.take() {
+                        let new = (v.trim_start, v.trim_end);
+                        if new != snap.original {
+                            v.history.record(Action::TrimChanged {
+                                old: snap.original,
+                                new,
+                            });
+                        }
+                    }
+                }
                 if let Some(target) = action.seek_to {
                     v.set_playing(false);
                     v.seek(target);
@@ -625,36 +743,59 @@ impl FrammpegApp {
         let Phase::Ready(v) = &mut self.phase else {
             return;
         };
-        if v.total_frames == 0 {
-            return;
-        }
-        let last = v.total_frames - 1;
         match action {
-            TransportAction::Home => {
-                v.set_playing(false);
-                v.seek(0);
+            TransportAction::ScaleChanged(new_scale) => {
+                v.strip_scale = new_scale;
             }
-            TransportAction::End => {
-                v.set_playing(false);
-                v.seek(last);
-            }
-            TransportAction::Back(n) => {
-                v.set_playing(false);
-                v.seek(v.current_frame.saturating_sub(n));
-            }
-            TransportAction::Fwd(n) => {
-                v.set_playing(false);
-                v.seek((v.current_frame + n).min(last));
-            }
-            TransportAction::TogglePlay => {
-                v.set_playing(!v.playing);
+            _ => {
+                if v.total_frames == 0 {
+                    return;
+                }
+                let (lo, hi) = trim_range(v);
+                match action {
+                    TransportAction::Home => {
+                        v.set_playing(false);
+                        v.seek(lo);
+                    }
+                    TransportAction::End => {
+                        v.set_playing(false);
+                        v.seek(hi);
+                    }
+                    TransportAction::Back(n) => {
+                        v.set_playing(false);
+                        let start = v.current_frame.clamp(lo, hi);
+                        v.seek(start.saturating_sub(n).max(lo));
+                    }
+                    TransportAction::Fwd(n) => {
+                        v.set_playing(false);
+                        let start = v.current_frame.clamp(lo, hi);
+                        v.seek((start + n).min(hi));
+                    }
+                    TransportAction::TogglePlay => {
+                        v.set_playing(!v.playing);
+                    }
+                    TransportAction::ScaleChanged(_) => unreachable!(),
+                }
             }
         }
     }
 
     fn moments_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(2.0);
-        ui.label(RichText::new("Moments").color(theme::TEXT).strong());
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Moments").color(theme::TEXT).strong());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui
+                    .button(RichText::new("✕").color(theme::TEXT_MUTED))
+                    .on_hover_text("Close panel")
+                    .clicked()
+                {
+                    if let Phase::Ready(v) = &mut self.phase {
+                        v.moments_panel_open = false;
+                    }
+                }
+            });
+        });
         ui.separator();
 
         let Phase::Ready(v) = &mut self.phase else {
@@ -666,7 +807,7 @@ impl FrammpegApp {
             ui.label(RichText::new("no moments yet").color(theme::TEXT_MUTED));
             ui.add_space(6.0);
             ui.label(
-                RichText::new("Hit 'Mark notable' on the toolbar to save the current frame.")
+                RichText::new("Add a rectangle or text annotation to auto-create a moment.")
                     .small()
                     .color(theme::TEXT_MUTED),
             );
@@ -684,11 +825,23 @@ impl FrammpegApp {
                     let short = truncate(&preview, 32);
                     (m.frame_index, short, m.buffer)
                 };
+                let in_range = v.in_trim(frame_index);
                 let header = format!("Frame {}", frame_index + 1);
-                let response = ui.selectable_label(
-                    selected,
-                    RichText::new(format!("{header}\n{note_preview}")).color(theme::TEXT),
-                );
+                let mut label_text =
+                    RichText::new(format!("{header}\n{note_preview}"));
+                if in_range {
+                    label_text = label_text.color(theme::TEXT);
+                } else {
+                    label_text = label_text.color(theme::TEXT_MUTED).italics();
+                }
+                let response = ui.selectable_label(selected, label_text);
+                let response = if in_range {
+                    response
+                } else {
+                    response.on_hover_text(
+                        "Outside the trim range — excluded from playback and export until the yellow handles cover it",
+                    )
+                };
                 if response.clicked() {
                     jump_to = Some(frame_index);
                     if v.selected_moment != Some(i) {
@@ -913,6 +1066,7 @@ impl FrammpegApp {
                             let list = v.annotations.entry(current).or_default();
                             let index = list.len();
                             list.push(annotation.clone());
+                            v.auto_mark_if_first_annotation(current);
                             v.history.record(Action::AnnotationCreated {
                                 frame: current,
                                 index,
@@ -1192,7 +1346,7 @@ impl FrammpegApp {
         if total == 0 {
             return;
         }
-        let last = total - 1;
+        let (lo, hi) = trim_range(v);
         let mut cur = v.current_frame;
         let mut toggle_play = false;
         let mut undo_requested = false;
@@ -1217,13 +1371,16 @@ impl FrammpegApp {
                     }
                     let big = modifiers.shift;
                     let step = if big { 10 } else { 1 };
+                    // Any step out of the trim range snaps back into range —
+                    // seed the step position by clamping current into [lo, hi].
+                    let start = cur.clamp(lo, hi);
                     match key {
-                        Key::ArrowLeft => cur = cur.saturating_sub(step),
-                        Key::ArrowRight => cur = (cur + step).min(last),
-                        Key::Home => cur = 0,
-                        Key::End => cur = last,
-                        Key::Comma => cur = cur.saturating_sub(1),
-                        Key::Period => cur = (cur + 1).min(last),
+                        Key::ArrowLeft => cur = start.saturating_sub(step).max(lo),
+                        Key::ArrowRight => cur = (start + step).min(hi),
+                        Key::Home => cur = lo,
+                        Key::End => cur = hi,
+                        Key::Comma => cur = start.saturating_sub(1).max(lo),
+                        Key::Period => cur = (start + 1).min(hi),
                         Key::Space => toggle_play = true,
                         _ => {}
                     }
@@ -1244,6 +1401,8 @@ impl FrammpegApp {
             let mut state = HistoryState {
                 annotations: &mut v.annotations,
                 moments: &mut v.moments,
+                trim_start: &mut v.trim_start,
+                trim_end: &mut v.trim_end,
             };
             if let Some(action) = v.history.undo(&mut state) {
                 v.after_history_change(&action);
@@ -1254,11 +1413,24 @@ impl FrammpegApp {
             let mut state = HistoryState {
                 annotations: &mut v.annotations,
                 moments: &mut v.moments,
+                trim_start: &mut v.trim_start,
+                trim_end: &mut v.trim_end,
             };
             if let Some(action) = v.history.redo(&mut state) {
                 v.after_history_change(&action);
             }
         }
+    }
+}
+
+fn trim_range(v: &VideoState) -> (usize, usize) {
+    if v.total_frames == 0 {
+        return (0, 0);
+    }
+    if v.trim_enabled() {
+        (v.trim_start, v.trim_end)
+    } else {
+        (0, v.total_frames - 1)
     }
 }
 
@@ -1276,6 +1448,31 @@ impl eframe::App for FrammpegApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll_extraction(&ctx);
+
+        let new_title = match &self.phase {
+            Phase::Empty => "Frammpeg".to_string(),
+            Phase::Extracting(s) => {
+                let filename = s
+                    .video_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("video");
+                format!("Frammpeg — {} (extracting…)", filename)
+            }
+            Phase::Ready(v) => {
+                let filename = v
+                    .video_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("video");
+                format!("{} — Frammpeg", filename)
+            }
+            Phase::Error(_) => "Frammpeg — error".to_string(),
+        };
+        if new_title != self.last_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(new_title.clone()));
+            self.last_title = new_title;
+        }
 
         // Snapshot prev_current_frame at the start of the frame so the
         // filmstrip can auto-scroll on any change made this frame.
@@ -1314,11 +1511,15 @@ impl eframe::App for FrammpegApp {
             .frame(panel_frame)
             .show(ui, |ui| self.bottom_panel(ui));
 
-        Panel::right("moments")
-            .default_size(260.0)
-            .min_size(220.0)
-            .frame(Frame::default().fill(theme::PANEL).inner_margin(10.0))
-            .show(ui, |ui| self.moments_panel(ui));
+        if let Phase::Ready(v) = &self.phase {
+            if v.moments_panel_open {
+                Panel::right("moments")
+                    .default_size(260.0)
+                    .min_size(220.0)
+                    .frame(Frame::default().fill(theme::PANEL).inner_margin(10.0))
+                    .show(ui, |ui| self.moments_panel(ui));
+            }
+        }
 
         CentralPanel::default()
             .frame(Frame::default().fill(theme::CANVAS).inner_margin(8.0))
@@ -1330,5 +1531,49 @@ impl eframe::App for FrammpegApp {
                 ctx.request_repaint_after(transport::frame_period(v.fps));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_state(total_frames: usize) -> VideoState {
+        let session = SessionDirs {
+            root: PathBuf::from("/tmp/test"),
+            frames: PathBuf::from("/tmp/test/frames"),
+            export: PathBuf::from("/tmp/test/export"),
+        };
+        let ctx = egui::Context::default();
+        VideoState::new(session, PathBuf::from("test.mp4"), total_frames, 30.0, &ctx)
+    }
+
+    #[test]
+    fn trim_enabled_false_when_trim_mode_off() {
+        let mut v = make_test_state(100);
+        v.trim_mode = false;
+        v.trim_start = 10;
+        v.trim_end = 50;
+        assert!(!v.trim_enabled());
+    }
+
+    #[test]
+    fn trim_enabled_true_when_trim_mode_on_and_range_valid() {
+        let mut v = make_test_state(100);
+        v.trim_mode = true;
+        v.trim_start = 10;
+        v.trim_end = 50;
+        assert!(v.trim_enabled());
+    }
+
+    #[test]
+    fn moments_panel_opens_on_first_moment_created() {
+        let mut v = make_test_state(100);
+        assert!(!v.moments_panel_open);
+        assert!(v.moments.is_empty());
+        let moment = Moment::new(5);
+        v.moments.push(moment);
+        v.moments_panel_open = true;
+        assert!(v.moments_panel_open);
     }
 }

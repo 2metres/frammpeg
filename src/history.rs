@@ -43,6 +43,10 @@ pub enum Action {
         old: String,
         new: String,
     },
+    TrimChanged {
+        old: (usize, usize),
+        new: (usize, usize),
+    },
 }
 
 impl Action {
@@ -59,6 +63,7 @@ impl Action {
             Action::MomentNoteChanged { index, .. } | Action::MomentBufferChanged { index, .. } => {
                 moments.get(*index).map(|m| m.frame_index)
             }
+            Action::TrimChanged { .. } => None,
         }
     }
 
@@ -110,6 +115,10 @@ impl Action {
                         *text = new.clone();
                     }
                 }
+            }
+            Action::TrimChanged { new, .. } => {
+                *state.trim_start = new.0;
+                *state.trim_end = new.1;
             }
         }
     }
@@ -163,6 +172,10 @@ impl Action {
                     }
                 }
             }
+            Action::TrimChanged { old, .. } => {
+                *state.trim_start = old.0;
+                *state.trim_end = old.1;
+            }
         }
     }
 }
@@ -170,6 +183,8 @@ impl Action {
 pub struct HistoryState<'a> {
     pub annotations: &'a mut HashMap<usize, Vec<Annotation>>,
     pub moments: &'a mut Vec<Moment>,
+    pub trim_start: &'a mut usize,
+    pub trim_end: &'a mut usize,
 }
 
 #[derive(Debug, Default)]
@@ -279,11 +294,25 @@ mod tests {
     fn state<'a>(
         anns: &'a mut HashMap<usize, Vec<Annotation>>,
         moms: &'a mut Vec<Moment>,
+        trim_start: &'a mut usize,
+        trim_end: &'a mut usize,
     ) -> HistoryState<'a> {
         HistoryState {
             annotations: anns,
             moments: moms,
+            trim_start,
+            trim_end,
         }
+    }
+
+    // Test helper that stitches together dummy trim locals so tests that don't
+    // exercise trim can keep the two-arg call site.
+    macro_rules! call {
+        ($h:ident.$op:ident($anns:expr, $moms:expr)) => {{
+            let mut __ts = 0usize;
+            let mut __te = 0usize;
+            $h.$op(&mut state($anns, $moms, &mut __ts, &mut __te))
+        }};
     }
 
     #[test]
@@ -300,7 +329,7 @@ mod tests {
         let mut anns: HashMap<usize, Vec<Annotation>> = HashMap::new();
         let mut moms: Vec<Moment> = Vec::new();
         let mut h = History::new(HISTORY_CAP);
-        assert!(h.undo(&mut state(&mut anns, &mut moms)).is_none());
+        assert!(call!(h.undo(&mut anns, &mut moms)).is_none());
         assert!(anns.is_empty());
         assert!(moms.is_empty());
     }
@@ -310,7 +339,7 @@ mod tests {
         let mut anns: HashMap<usize, Vec<Annotation>> = HashMap::new();
         let mut moms: Vec<Moment> = Vec::new();
         let mut h = History::new(HISTORY_CAP);
-        assert!(h.redo(&mut state(&mut anns, &mut moms)).is_none());
+        assert!(call!(h.redo(&mut anns, &mut moms)).is_none());
     }
 
     #[test]
@@ -327,12 +356,12 @@ mod tests {
             annotation: rect(1.0),
         });
 
-        h.undo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.undo(&mut anns, &mut moms)).unwrap();
         assert!(!anns.contains_key(&3), "empty frame removed");
         assert_eq!(h.undo_len(), 0);
         assert_eq!(h.redo_len(), 1);
 
-        h.redo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.redo(&mut anns, &mut moms)).unwrap();
         assert_eq!(anns.get(&3).map(|l| l.len()), Some(1));
         assert_eq!(h.undo_len(), 1);
         assert_eq!(h.redo_len(), 0);
@@ -352,12 +381,12 @@ mod tests {
             annotation: removed,
         });
 
-        h.undo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.undo(&mut anns, &mut moms)).unwrap();
         let list = anns.get(&2).unwrap();
         assert_eq!(list.len(), 3);
         assert_eq!(list[1], rect(2.0));
 
-        h.redo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.redo(&mut anns, &mut moms)).unwrap();
         let list = anns.get(&2).unwrap();
         assert_eq!(list.len(), 2);
         assert_eq!(list[0], rect(1.0));
@@ -376,11 +405,11 @@ mod tests {
             moment: moment(9, "b", 5),
         });
 
-        h.undo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.undo(&mut anns, &mut moms)).unwrap();
         assert_eq!(moms.len(), 1);
         assert_eq!(moms[0].note, "a");
 
-        h.redo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.redo(&mut anns, &mut moms)).unwrap();
         assert_eq!(moms.len(), 2);
         assert_eq!(moms[1].note, "b");
     }
@@ -397,11 +426,11 @@ mod tests {
             moment: removed,
         });
 
-        h.undo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.undo(&mut anns, &mut moms)).unwrap();
         assert_eq!(moms.len(), 3);
         assert_eq!(moms[1].note, "b");
 
-        h.redo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.redo(&mut anns, &mut moms)).unwrap();
         assert_eq!(moms.len(), 2);
         assert_eq!(moms[0].note, "a");
         assert_eq!(moms[1].note, "c");
@@ -420,10 +449,10 @@ mod tests {
             new: "new".into(),
         });
 
-        h.undo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.undo(&mut anns, &mut moms)).unwrap();
         assert_eq!(moms[0].note, "old");
 
-        h.redo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.redo(&mut anns, &mut moms)).unwrap();
         assert_eq!(moms[0].note, "new");
     }
 
@@ -440,10 +469,10 @@ mod tests {
             new: 12,
         });
 
-        h.undo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.undo(&mut anns, &mut moms)).unwrap();
         assert_eq!(moms[0].buffer, 5);
 
-        h.redo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.redo(&mut anns, &mut moms)).unwrap();
         assert_eq!(moms[0].buffer, 12);
     }
 
@@ -464,14 +493,14 @@ mod tests {
             new: "Hello World".into(),
         });
 
-        h.undo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.undo(&mut anns, &mut moms)).unwrap();
         if let Some(Annotation::Text { text, .. }) = anns.get(&3).and_then(|l| l.first()) {
             assert_eq!(text, "Hello");
         } else {
             panic!("annotation not found or not Text");
         }
 
-        h.redo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.redo(&mut anns, &mut moms)).unwrap();
         if let Some(Annotation::Text { text, .. }) = anns.get(&3).and_then(|l| l.first()) {
             assert_eq!(text, "Hello World");
         } else {
@@ -492,10 +521,10 @@ mod tests {
             annotation: text("hi"),
         });
 
-        h.undo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.undo(&mut anns, &mut moms)).unwrap();
         assert!(!anns.contains_key(&0));
 
-        h.redo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.redo(&mut anns, &mut moms)).unwrap();
         assert_eq!(anns.get(&0).unwrap().len(), 1);
         assert_eq!(anns[&0][0], text("hi"));
     }
@@ -512,7 +541,7 @@ mod tests {
             index: 0,
             annotation: rect(1.0),
         });
-        h.undo(&mut state(&mut anns, &mut moms)).unwrap();
+        call!(h.undo(&mut anns, &mut moms)).unwrap();
         assert_eq!(h.redo_len(), 1);
 
         anns.entry(1).or_default().push(rect(2.0));
@@ -566,7 +595,7 @@ mod tests {
         // Undo 101 times — the first undo drops nothing from redo (well
         // under cap); by the last, redo should be capped at HISTORY_CAP.
         for _ in 0..HISTORY_CAP + 1 {
-            let _ = h.undo(&mut state(&mut anns, &mut moms));
+            let _ = call!(h.undo(&mut anns, &mut moms));
         }
         assert_eq!(h.redo_len(), HISTORY_CAP);
     }
@@ -597,13 +626,13 @@ mod tests {
 
         // Undo all three, then redo all three.
         for _ in 0..3 {
-            assert!(h.undo(&mut state(&mut anns, &mut moms)).is_some());
+            assert!(call!(h.undo(&mut anns, &mut moms)).is_some());
         }
         assert!(!anns.contains_key(&5));
         assert!(moms.is_empty());
 
         for _ in 0..3 {
-            assert!(h.redo(&mut state(&mut anns, &mut moms)).is_some());
+            assert!(call!(h.redo(&mut anns, &mut moms)).is_some());
         }
         assert_eq!(anns.get(&5).unwrap().len(), 2);
         assert_eq!(moms.len(), 1);
@@ -640,5 +669,37 @@ mod tests {
             new: "".into(),
         };
         assert_eq!(a.affected_frame(&[]), None);
+
+        let a = Action::TrimChanged {
+            old: (0, 99),
+            new: (5, 80),
+        };
+        assert_eq!(a.affected_frame(&[]), None);
+    }
+
+    #[test]
+    fn trim_changed_round_trip() {
+        let mut anns: HashMap<usize, Vec<Annotation>> = HashMap::new();
+        let mut moms: Vec<Moment> = Vec::new();
+        let mut ts: usize = 5;
+        let mut te: usize = 80;
+        let mut h = History::new(HISTORY_CAP);
+
+        h.record(Action::TrimChanged {
+            old: (0, 99),
+            new: (5, 80),
+        });
+
+        {
+            let mut s = state(&mut anns, &mut moms, &mut ts, &mut te);
+            h.undo(&mut s).unwrap();
+        }
+        assert_eq!((ts, te), (0, 99));
+
+        {
+            let mut s = state(&mut anns, &mut moms, &mut ts, &mut te);
+            h.redo(&mut s).unwrap();
+        }
+        assert_eq!((ts, te), (5, 80));
     }
 }

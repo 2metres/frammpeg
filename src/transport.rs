@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use egui::{Ui, Vec2};
+use egui::{Color32, Ui, Vec2};
 
 use crate::icons::{Icon, IconCache};
 use crate::theme;
@@ -12,30 +12,33 @@ const STEP_BUTTON_W: f32 = 34.0;
 const STEP_BUTTON_H: f32 = 30.0;
 const PLAY_BUTTON_W: f32 = 48.0;
 const PLAY_BUTTON_H: f32 = 30.0;
-const STEP_ICON_PT: f32 = 20.0;
-const PLAY_ICON_PT: f32 = 24.0;
+const STEP_ICON_PT: f32 = 22.0;
+const PLAY_ICON_PT: f32 = 28.0;
 const BUTTON_GAP: f32 = 4.0;
 const STEP_BUTTON_COUNT: f32 = 6.0;
 const ROW_WIDTH: f32 = STEP_BUTTON_W * STEP_BUTTON_COUNT + PLAY_BUTTON_W + BUTTON_GAP * 6.0;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TransportAction {
     Home,
     Back(usize),
     Fwd(usize),
     End,
     TogglePlay,
+    ScaleChanged(f32),
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct TransportView {
     pub enabled: bool,
     pub playing: bool,
+    pub strip_scale: f32,
 }
 
 /// Draw the centered transport button row. Returns the first pressed action.
 pub fn draw(ui: &mut Ui, icons: &mut IconCache, view: TransportView) -> Option<TransportAction> {
     let mut action: Option<TransportAction> = None;
+    let mut new_scale = view.strip_scale;
 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = BUTTON_GAP;
@@ -92,6 +95,17 @@ pub fn draw(ui: &mut Ui, icons: &mut IconCache, view: TransportView) -> Option<T
         ) {
             action = Some(TransportAction::End);
         }
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let slider = egui::Slider::new(&mut new_scale, 0.0..=1.0)
+                .show_value(false)
+                .min_decimals(0)
+                .max_decimals(2);
+            let slider_resp = ui.add_enabled(view.enabled, slider.fixed_decimals(2));
+            if slider_resp.changed() {
+                action = Some(TransportAction::ScaleChanged(new_scale));
+            }
+        });
     });
 
     action
@@ -105,7 +119,7 @@ fn step_button(
     tooltip: &str,
 ) -> bool {
     let color = if enabled {
-        theme::TEXT
+        Color32::WHITE
     } else {
         theme::TEXT_MUTED
     };
@@ -117,6 +131,7 @@ fn step_button(
                 STEP_ICON_PT,
                 color,
                 Vec2::new(STEP_BUTTON_W, STEP_BUTTON_H),
+                false,
             )
             .on_hover_text(tooltip)
             .clicked()
@@ -131,7 +146,7 @@ fn play_button(ui: &mut Ui, icons: &mut IconCache, view: TransportView) -> bool 
         Icon::Play
     };
     let color = if view.enabled {
-        theme::ACCENT
+        Color32::WHITE
     } else {
         theme::TEXT_MUTED
     };
@@ -148,6 +163,7 @@ fn play_button(ui: &mut Ui, icons: &mut IconCache, view: TransportView) -> bool 
                 PLAY_ICON_PT,
                 color,
                 Vec2::new(PLAY_BUTTON_W, PLAY_BUTTON_H),
+                false,
             )
             .on_hover_text(tooltip)
             .clicked()
@@ -175,17 +191,14 @@ pub fn advance_frames(fps: f32, elapsed: Duration) -> (u32, Duration) {
     (frames, leftover)
 }
 
-/// Advance the current frame by `frames`, clamping at the last frame. Returns
-/// `(next, hit_end)`; hit_end is true when the advance reached or overshot
-/// the final frame — the caller should pause playback.
-pub fn step_play(current: usize, frames: u32, total: usize) -> (usize, bool) {
-    if total == 0 {
-        return (0, true);
-    }
-    let last = total - 1;
+/// Advance the current frame by `frames`, clamping at the inclusive
+/// `range_end` (either the last frame of the clip or the trim range end).
+/// Returns `(next, hit_end)`; `hit_end` is true when the advance reached
+/// or overshot the range end — the caller should pause playback.
+pub fn step_play_to(current: usize, frames: u32, range_end: usize) -> (usize, bool) {
     let next = current.saturating_add(frames as usize);
-    if next >= last {
-        (last, true)
+    if next >= range_end {
+        (range_end, true)
     } else {
         (next, false)
     }
@@ -234,28 +247,24 @@ mod tests {
     }
 
     #[test]
-    fn step_play_clamps_at_end_and_flags_hit_end() {
-        assert_eq!(step_play(9, 1, 10), (9, true));
+    fn step_play_to_clamps_at_range_end() {
+        // range end = 15, current 14, +3 -> clamp to 15 and flag hit_end.
+        assert_eq!(step_play_to(14, 3, 15), (15, true));
     }
 
     #[test]
-    fn step_play_far_overshoot_clamps_to_last_frame() {
-        assert_eq!(step_play(0, 25, 10), (9, true));
+    fn step_play_to_advances_normally_within_range() {
+        assert_eq!(step_play_to(10, 2, 15), (12, false));
     }
 
     #[test]
-    fn step_play_reaching_last_frame_exactly_flags_hit_end() {
-        assert_eq!(step_play(8, 1, 10), (9, true));
+    fn step_play_to_reaches_range_end_exactly() {
+        assert_eq!(step_play_to(14, 1, 15), (15, true));
     }
 
     #[test]
-    fn step_play_advances_normal() {
-        assert_eq!(step_play(4, 2, 10), (6, false));
-    }
-
-    #[test]
-    fn step_play_zero_total_stays_zero_and_flags_hit_end() {
-        assert_eq!(step_play(0, 5, 0), (0, true));
+    fn step_play_to_current_at_end_stays_and_flags() {
+        assert_eq!(step_play_to(15, 1, 15), (15, true));
     }
 
     #[test]

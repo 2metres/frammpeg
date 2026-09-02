@@ -15,6 +15,10 @@ pub const TEXT: Color32 = Color32::from_rgb(0xD8, 0xDC, 0xE1);
 pub const TEXT_MUTED: Color32 = Color32::from_rgb(0x8A, 0x92, 0x9B);
 pub const ACCENT: Color32 = Color32::from_rgb(0x4E, 0xC9, 0xB0);
 pub const ACCENT_HOVERED: Color32 = Color32::from_rgb(0x6A, 0xD6, 0xC1);
+// Warm amber for trim handles — reads as "yellow tape" against the dark strip
+// without shouting over the teal accent.
+pub const TRIM_ACCENT: Color32 = Color32::from_rgb(0xF5, 0xC5, 0x42);
+pub const TRIM_ACCENT_HOVERED: Color32 = Color32::from_rgb(0xFA, 0xD2, 0x6B);
 
 pub fn visuals() -> Visuals {
     let mut v = Visuals::dark();
