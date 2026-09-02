@@ -114,17 +114,14 @@ pub fn advance_frames(fps: f32, elapsed: Duration) -> (u32, Duration) {
     (frames, leftover)
 }
 
-/// Advance the current frame by `frames`, clamping at the last frame. Returns
-/// `(next, hit_end)`; hit_end is true when the advance reached or overshot
-/// the final frame — the caller should pause playback.
-pub fn step_play(current: usize, frames: u32, total: usize) -> (usize, bool) {
-    if total == 0 {
-        return (0, true);
-    }
-    let last = total - 1;
+/// Advance the current frame by `frames`, clamping at the inclusive
+/// `range_end` (either the last frame of the clip or the trim range end).
+/// Returns `(next, hit_end)`; `hit_end` is true when the advance reached
+/// or overshot the range end — the caller should pause playback.
+pub fn step_play_to(current: usize, frames: u32, range_end: usize) -> (usize, bool) {
     let next = current.saturating_add(frames as usize);
-    if next >= last {
-        (last, true)
+    if next >= range_end {
+        (range_end, true)
     } else {
         (next, false)
     }
@@ -173,28 +170,24 @@ mod tests {
     }
 
     #[test]
-    fn step_play_clamps_at_end_and_flags_hit_end() {
-        assert_eq!(step_play(9, 1, 10), (9, true));
+    fn step_play_to_clamps_at_range_end() {
+        // range end = 15, current 14, +3 -> clamp to 15 and flag hit_end.
+        assert_eq!(step_play_to(14, 3, 15), (15, true));
     }
 
     #[test]
-    fn step_play_far_overshoot_clamps_to_last_frame() {
-        assert_eq!(step_play(0, 25, 10), (9, true));
+    fn step_play_to_advances_normally_within_range() {
+        assert_eq!(step_play_to(10, 2, 15), (12, false));
     }
 
     #[test]
-    fn step_play_reaching_last_frame_exactly_flags_hit_end() {
-        assert_eq!(step_play(8, 1, 10), (9, true));
+    fn step_play_to_reaches_range_end_exactly() {
+        assert_eq!(step_play_to(14, 1, 15), (15, true));
     }
 
     #[test]
-    fn step_play_advances_normal() {
-        assert_eq!(step_play(4, 2, 10), (6, false));
-    }
-
-    #[test]
-    fn step_play_zero_total_stays_zero_and_flags_hit_end() {
-        assert_eq!(step_play(0, 5, 0), (0, true));
+    fn step_play_to_current_at_end_stays_and_flags() {
+        assert_eq!(step_play_to(15, 1, 15), (15, true));
     }
 
     #[test]

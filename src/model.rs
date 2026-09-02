@@ -43,15 +43,23 @@ impl Moment {
     }
 }
 
-/// Clamp a buffer window `[i - buffer, i + buffer]` into `[0, total)` inclusive
-/// on the low end, exclusive on the high end. Returns `(lo, hi)` inclusive.
-pub fn buffer_range(frame_index: usize, buffer: usize, total: usize) -> Option<(usize, usize)> {
-    if total == 0 {
+/// Clamp a buffer window `[i - buffer, i + buffer]` into `[range_start, range_end]`
+/// inclusive on both ends. Returns `None` if the range is inverted or the
+/// buffered window falls entirely outside it.
+pub fn buffer_range_within(
+    frame_index: usize,
+    buffer: usize,
+    range_start: usize,
+    range_end: usize,
+) -> Option<(usize, usize)> {
+    if range_end < range_start {
         return None;
     }
-    let last = total - 1;
-    let lo = frame_index.saturating_sub(buffer);
-    let hi = frame_index.saturating_add(buffer).min(last);
+    let lo = frame_index.saturating_sub(buffer).max(range_start);
+    let hi = frame_index.saturating_add(buffer).min(range_end);
+    if lo > hi {
+        return None;
+    }
     Some((lo, hi))
 }
 
@@ -60,32 +68,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn buffer_range_typical() {
-        assert_eq!(buffer_range(40, 5, 100), Some((35, 45)));
+    fn buffer_range_within_trims_to_range() {
+        // Frame 40 with buffer 5, but the trim range is [30, 45].
+        assert_eq!(buffer_range_within(40, 5, 30, 45), Some((35, 45)));
     }
 
     #[test]
-    fn buffer_range_clamps_low() {
-        assert_eq!(buffer_range(2, 5, 100), Some((0, 7)));
+    fn buffer_range_within_clamps_low_by_range_start() {
+        // Frame 32 with buffer 5 would want [27, 37]; trim start 30 lifts the lo.
+        assert_eq!(buffer_range_within(32, 5, 30, 45), Some((30, 37)));
     }
 
     #[test]
-    fn buffer_range_clamps_high() {
-        assert_eq!(buffer_range(97, 5, 100), Some((92, 99)));
+    fn buffer_range_within_clamps_high_by_range_end() {
+        assert_eq!(buffer_range_within(43, 5, 30, 45), Some((38, 45)));
     }
 
     #[test]
-    fn buffer_range_zero_total() {
-        assert_eq!(buffer_range(0, 5, 0), None);
+    fn buffer_range_within_inverted_range_is_none() {
+        assert_eq!(buffer_range_within(5, 2, 9, 3), None);
     }
 
     #[test]
-    fn buffer_range_zero_buffer() {
-        assert_eq!(buffer_range(10, 0, 100), Some((10, 10)));
+    fn buffer_range_within_frame_past_end_returns_none() {
+        // Frame well past the range end with a small buffer — no overlap.
+        assert_eq!(buffer_range_within(50, 3, 30, 45), None);
     }
 
     #[test]
-    fn buffer_range_full_span() {
-        assert_eq!(buffer_range(0, 100, 5), Some((0, 4)));
+    fn buffer_range_within_frame_before_start_returns_none() {
+        assert_eq!(buffer_range_within(5, 3, 30, 45), None);
+    }
+
+    #[test]
+    fn buffer_range_within_single_frame_range() {
+        assert_eq!(buffer_range_within(7, 5, 7, 7), Some((7, 7)));
     }
 }
