@@ -17,7 +17,7 @@ const BUTTON_GAP: f32 = 4.0;
 const STEP_BUTTON_COUNT: f32 = 4.0;
 const ROW_WIDTH: f32 = STEP_BUTTON_W * STEP_BUTTON_COUNT + PLAY_BUTTON_W + BUTTON_GAP * 4.0;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TransportAction {
     Home,
     Back(usize),
@@ -26,15 +26,19 @@ pub enum TransportAction {
     TogglePlay,
     ToggleTrim,
     ScaleChanged(f32),
+    FrameInputChanged(String),
+    FrameInputCommit(String),
+    FrameInputCancel,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct TransportView {
     pub enabled: bool,
     pub playing: bool,
     pub trim_mode: bool,
     pub strip_scale: f32,
     pub fps: f32,
+    pub frame_input_edit: Option<String>,
 }
 
 /// Draw the centered transport button row. Returns the first pressed action.
@@ -49,9 +53,19 @@ pub fn draw(
     let mut new_scale = view.strip_scale;
 
     ui.vertical(|ui| {
-        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-            render_frame_badge(ui, current_frame + 1, total_frames);
-        });
+        let badge_action = ui
+            .with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                render_frame_badge(
+                    ui,
+                    current_frame + 1,
+                    total_frames,
+                    view.frame_input_edit.as_ref(),
+                )
+            })
+            .inner;
+        if action.is_none() && badge_action.is_some() {
+            action = badge_action;
+        }
 
         ui.horizontal(|ui| {
             let row_start = ui.cursor().left();
@@ -110,7 +124,7 @@ pub fn draw(
                 };
                 action = Some(TransportAction::Back(step));
             }
-            if play_button(ui, icons, view) {
+            if play_button(ui, icons, &view) {
                 action = Some(TransportAction::TogglePlay);
             }
             if step_button(
@@ -154,28 +168,63 @@ pub fn draw(
     action
 }
 
-fn render_frame_badge(ui: &mut Ui, current: usize, total: usize) {
-    let text = format!("{} / {}", current, total.max(1));
-    let galley = ui.painter().layout_no_wrap(
-        text.clone(),
-        egui::FontId::monospace(12.0),
-        theme::TEXT_MUTED,
-    );
-    let size = galley.size() + Vec2::new(12.0, 6.0);
-    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
-    let bg = if response.hovered() {
-        theme::WIDGET_HOVERED
+fn render_frame_badge(
+    ui: &mut Ui,
+    current: usize,
+    total: usize,
+    editing: Option<&String>,
+) -> Option<TransportAction> {
+    use egui::TextEdit;
+
+    if let Some(buffer) = editing {
+        let mut text = buffer.clone();
+        let response = ui.add(
+            TextEdit::singleline(&mut text)
+                .desired_width(60.0)
+                .font(egui::FontId::monospace(12.0)),
+        );
+
+        if !response.has_focus() {
+            response.request_focus();
+        }
+
+        if text != *buffer {
+            return Some(TransportAction::FrameInputChanged(text));
+        }
+        if response.lost_focus() {
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                return Some(TransportAction::FrameInputCancel);
+            }
+            return Some(TransportAction::FrameInputCommit(text));
+        }
+        None
     } else {
-        theme::WIDGET_IDLE
-    };
-    ui.painter().rect_filled(rect, CornerRadius::same(4), bg);
-    ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        &text,
-        egui::FontId::monospace(12.0),
-        theme::TEXT_MUTED,
-    );
+        let text = format!("{} / {}", current, total.max(1));
+        let galley = ui.painter().layout_no_wrap(
+            text.clone(),
+            egui::FontId::monospace(12.0),
+            theme::TEXT_MUTED,
+        );
+        let size = galley.size() + Vec2::new(12.0, 6.0);
+        let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+        let bg = if response.hovered() {
+            theme::WIDGET_HOVERED
+        } else {
+            theme::WIDGET_IDLE
+        };
+        ui.painter().rect_filled(rect, CornerRadius::same(4), bg);
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            &text,
+            egui::FontId::monospace(12.0),
+            theme::TEXT_MUTED,
+        );
+        if response.clicked() {
+            return Some(TransportAction::FrameInputChanged(current.to_string()));
+        }
+        None
+    }
 }
 
 fn step_button(
@@ -206,7 +255,7 @@ fn step_button(
     .inner
 }
 
-fn play_button(ui: &mut Ui, icons: &mut IconCache, view: TransportView) -> bool {
+fn play_button(ui: &mut Ui, icons: &mut IconCache, view: &TransportView) -> bool {
     let icon = if view.playing {
         Icon::Pause
     } else {

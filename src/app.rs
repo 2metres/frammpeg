@@ -102,6 +102,7 @@ struct VideoState {
     scroll_accumulator: f32,
     strip_stride: usize,
     strip_scale: f32,
+    frame_input_edit: Option<String>,
 }
 
 struct NoteEditSnapshot {
@@ -178,6 +179,7 @@ impl VideoState {
             scroll_accumulator: 0.0,
             strip_stride: 1,
             strip_scale: 1.0,
+            frame_input_edit: None,
         }
     }
 
@@ -614,6 +616,7 @@ impl FrammpegApp {
             trim_mode,
             strip_scale,
             fps,
+            frame_input_edit,
         ) = {
             let Phase::Ready(v) = &self.phase else {
                 return;
@@ -627,6 +630,7 @@ impl FrammpegApp {
                 v.trim_mode,
                 v.strip_scale,
                 v.fps,
+                v.frame_input_edit.clone(),
             )
         };
 
@@ -644,6 +648,7 @@ impl FrammpegApp {
                             trim_mode,
                             strip_scale,
                             fps,
+                            frame_input_edit,
                         },
                         current_frame,
                         total_frames,
@@ -720,6 +725,20 @@ impl FrammpegApp {
             TransportAction::ToggleTrim => {
                 v.trim_mode = !v.trim_mode;
             }
+            TransportAction::FrameInputChanged(s) => {
+                v.frame_input_edit = Some(s);
+            }
+            TransportAction::FrameInputCommit(s) => {
+                if let Ok(n) = s.trim().parse::<usize>() {
+                    if n >= 1 && n <= v.total_frames {
+                        v.seek(n - 1);
+                    }
+                }
+                v.frame_input_edit = None;
+            }
+            TransportAction::FrameInputCancel => {
+                v.frame_input_edit = None;
+            }
             _ => {
                 if v.total_frames == 0 {
                     return;
@@ -747,7 +766,11 @@ impl FrammpegApp {
                     TransportAction::TogglePlay => {
                         v.set_playing(!v.playing);
                     }
-                    TransportAction::ScaleChanged(_) | TransportAction::ToggleTrim => {
+                    TransportAction::ScaleChanged(_)
+                    | TransportAction::ToggleTrim
+                    | TransportAction::FrameInputChanged(_)
+                    | TransportAction::FrameInputCommit(_)
+                    | TransportAction::FrameInputCancel => {
                         unreachable!()
                     }
                 }
