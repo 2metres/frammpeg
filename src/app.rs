@@ -420,6 +420,8 @@ impl FrammpegApp {
     pub fn new(cc: &CreationContext<'_>, sessions_root: Option<PathBuf>) -> Self {
         cc.egui_ctx.set_fonts(fonts::definitions());
         cc.egui_ctx.set_visuals(theme::visuals());
+        cc.egui_ctx
+            .send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));
         Self {
             sessions_root,
             phase: Phase::Empty,
