@@ -1518,10 +1518,17 @@ impl eframe::App for FrammpegApp {
             }
         }
 
-        let panel_frame = Frame::default().fill(theme::PANEL).inner_margin(6.0);
+        let panel_frame = Frame::default()
+            .fill(theme::PANEL)
+            .inner_margin(egui::Margin {
+                top: 28,
+                left: 6,
+                right: 6,
+                bottom: 6,
+            });
 
         Panel::top("toolbar")
-            .exact_size(40.0)
+            .exact_size(60.0)
             .resizable(false)
             .frame(panel_frame)
             .show(ui, |ui| self.toolbar(ui));
