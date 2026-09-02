@@ -893,6 +893,16 @@ impl FrammpegApp {
                             .small(),
                     );
                     ui.add_space(4.0);
+                    ui.scope(|ui| {
+                        let v_mut = ui.visuals_mut();
+                        v_mut.extreme_bg_color = theme::WIDGET_IDLE;
+                        v_mut.widgets.inactive.bg_fill = theme::WIDGET_IDLE;
+                        v_mut.widgets.inactive.weak_bg_fill = theme::WIDGET_IDLE;
+                        v_mut.widgets.hovered.bg_fill = theme::WIDGET_HOVERED;
+                        v_mut.widgets.active.bg_fill = theme::WIDGET_ACTIVE;
+                        v_mut.widgets.inactive.bg_stroke = Stroke::new(1.0, theme::STROKE);
+                        v_mut.widgets.hovered.bg_stroke = Stroke::new(1.0, theme::STROKE);
+                        v_mut.widgets.active.bg_stroke = Stroke::new(1.0, theme::ACCENT);
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("buffer +/-").small().color(theme::TEXT_MUTED));
                         let mut b = buffer;
@@ -958,6 +968,7 @@ impl FrammpegApp {
                             }
                         }
                     }
+                    });
                     ui.add_space(4.0);
                     if self
                         .icons
