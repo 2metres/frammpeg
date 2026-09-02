@@ -135,18 +135,6 @@ The managed Beads block is task-tracking guidance, not permission to override re
 - **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
 - **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
 
-## Subagent Roles
-
-When an orchestrator dispatches subagents, each one has ONE role. Do not mix roles in one run.
-
-- **Implementer** — writes code against a specific bd ticket (or bundled tickets). Runs quality gates. Does NOT file new tickets for issues they notice outside their scope; they flag them in the handoff for the orchestrator.
-- **Reviewer** — reads a diff, verifies claims, finds defects. Reports findings inline (or via `ReportFindings` where available). Does NOT edit code to fix what they find.
-- **Polish agent** — sweeps a target area (a module, a feature, the whole app) for defects, dead code, inconsistencies, small bugs, or missed spec items. Files each finding as a nested bd task under a parent polish ticket via `bd create --parent=<parent-id>`. Does NOT implement fixes in the same run.
-
-Why: separating discovery from fix keeps each finding reviewable, keeps the orchestrator in charge of prioritization, prevents "helpful" polish-pass rewrites that expand scope silently, and produces a durable bd trail. A polish agent that also implements can mask its own findings by fixing them inline without a ticket.
-
-How to apply: dispatch prompts for reviewers and polish-sweep agents must include an explicit **"you file tickets, you do NOT edit code"** clause. Implementers are dispatched afterward against the filed tickets — individually or bundled.
-
 ## Session Completion
 
 This protocol applies when ending a Beads implementation workflow. It is subordinate to explicit user, repository, and orchestrator instructions.
