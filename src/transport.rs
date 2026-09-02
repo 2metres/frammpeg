@@ -188,14 +188,14 @@ fn render_frame_badge(
             response.request_focus();
         }
 
-        if text != *buffer {
-            return Some(TransportAction::FrameInputChanged(text));
-        }
         if response.lost_focus() {
             if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 return Some(TransportAction::FrameInputCancel);
             }
             return Some(TransportAction::FrameInputCommit(text));
+        }
+        if text != *buffer {
+            return Some(TransportAction::FrameInputChanged(text));
         }
         None
     } else {
