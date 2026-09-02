@@ -26,7 +26,7 @@ use crate::{export, fonts, theme};
 const FRAME_CACHE_SIZE: usize = 5;
 const COPY_TOAST_MS: u64 = 1200;
 const TRANSPORT_ROW_H: f32 = 40.0;
-const BOTTOM_PANEL_H: f32 = 200.0;
+const BOTTOM_PANEL_H: f32 = 224.0;
 const TOOL_ICON_PT: f32 = 16.0;
 const TOOL_BUTTON_SIZE: Vec2 = Vec2::new(28.0, 24.0);
 
@@ -367,21 +367,6 @@ impl VideoState {
             }
         }
     }
-
-    fn reset_trim(&mut self) {
-        if self.total_frames == 0 {
-            return;
-        }
-        self.finalize_pending_edits();
-        let old = (self.trim_start, self.trim_end);
-        let new = (0usize, self.total_frames - 1);
-        if old != new {
-            self.trim_start = new.0;
-            self.trim_end = new.1;
-            self.history.record(Action::TrimChanged { old, new });
-        }
-    }
-
     fn ensure_frame_texture(&mut self, ctx: &egui::Context, index: usize) -> Option<TextureHandle> {
         if let Some(pos) = self.frame_cache.iter().position(|(i, _)| *i == index) {
             let (_, tex) = self.frame_cache.remove(pos).unwrap();
@@ -564,29 +549,6 @@ impl FrammpegApp {
                 }
 
                 ui.separator();
-                if tool_button(ui, icons, Icon::Scissors, v.trim_mode)
-                    .on_hover_text(
-                        "Enable trim mode — gate the active frame range with yellow handles",
-                    )
-                    .clicked()
-                {
-                    v.trim_mode = !v.trim_mode;
-                }
-
-                if v.trim_mode {
-                    let reset_enabled = v.total_frames > 0
-                        && (v.trim_start != 0 || v.trim_end + 1 != v.total_frames);
-                    let reset_response =
-                        ui.add_enabled(reset_enabled, egui::Button::new("Reset trim").frame(false));
-                    if reset_response
-                        .on_hover_text("Reset the yellow trim handles to the full clip")
-                        .clicked()
-                    {
-                        v.reset_trim();
-                    }
-                }
-
-                ui.separator();
                 if ui
                     .add(egui::Button::new("Export").frame(false))
                     .on_hover_text("Write each moment's buffer + annotated frame to disk")
@@ -650,7 +612,16 @@ impl FrammpegApp {
     fn draw_bottom_panel_ready(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
 
-        let (enabled, playing, current_frame, prev_current_frame, total_frames, strip_scale, fps) = {
+        let (
+            enabled,
+            playing,
+            current_frame,
+            prev_current_frame,
+            total_frames,
+            trim_mode,
+            strip_scale,
+            fps,
+        ) = {
             let Phase::Ready(v) = &self.phase else {
                 return;
             };
@@ -660,6 +631,7 @@ impl FrammpegApp {
                 v.current_frame,
                 v.prev_current_frame,
                 v.total_frames,
+                v.trim_mode,
                 v.strip_scale,
                 v.fps,
             )
@@ -676,6 +648,7 @@ impl FrammpegApp {
                         TransportView {
                             enabled,
                             playing,
+                            trim_mode,
                             strip_scale,
                             fps,
                         },
@@ -751,6 +724,9 @@ impl FrammpegApp {
             TransportAction::ScaleChanged(new_scale) => {
                 v.strip_scale = new_scale;
             }
+            TransportAction::ToggleTrim => {
+                v.trim_mode = !v.trim_mode;
+            }
             _ => {
                 if v.total_frames == 0 {
                     return;
@@ -778,7 +754,9 @@ impl FrammpegApp {
                     TransportAction::TogglePlay => {
                         v.set_playing(!v.playing);
                     }
-                    TransportAction::ScaleChanged(_) => unreachable!(),
+                    TransportAction::ScaleChanged(_) | TransportAction::ToggleTrim => {
+                        unreachable!()
+                    }
                 }
             }
         }
