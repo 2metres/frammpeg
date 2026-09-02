@@ -629,7 +629,7 @@ impl FrammpegApp {
             if let Phase::Ready(v) = &mut self.phase {
                 v.thumbs.poll(&ctx);
                 let delta = v.current_frame.abs_diff(prev_current_frame);
-                let instant_scroll = delta > 30;
+                let instant_scroll = v.playing || delta > 30;
                 let action = filmstrip::draw(
                     ui,
                     FilmstripDrawParams {
