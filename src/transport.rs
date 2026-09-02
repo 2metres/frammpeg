@@ -25,6 +25,7 @@ pub enum TransportAction {
     Fwd(usize),
     End,
     TogglePlay,
+    ToggleTrim,
     ScaleChanged(f32),
 }
 
@@ -32,6 +33,7 @@ pub enum TransportAction {
 pub struct TransportView {
     pub enabled: bool,
     pub playing: bool,
+    pub trim_mode: bool,
     pub strip_scale: f32,
 }
 
@@ -46,82 +48,106 @@ pub fn draw(
     let mut action: Option<TransportAction> = None;
     let mut new_scale = view.strip_scale;
 
-    ui.horizontal(|ui| {
-        let row_start = ui.cursor().left();
-        let total_w = ui.available_width();
-        let row_center = row_start + total_w * 0.5;
+    ui.vertical(|ui| {
+        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+            render_frame_badge(ui, current_frame + 1, total_frames);
+        });
 
-        ui.spacing_mut().item_spacing.x = BUTTON_GAP;
+        ui.horizontal(|ui| {
+            let row_start = ui.cursor().left();
+            let total_w = ui.available_width();
+            let row_center = row_start + total_w * 0.5;
 
-        render_frame_badge(ui, current_frame + 1, total_frames);
-        ui.add_space(BUTTON_GAP);
-        let after_badge_x = ui.cursor().left();
+            ui.spacing_mut().item_spacing.x = BUTTON_GAP;
 
-        let target_playback_left = row_center - ROW_WIDTH * 0.5;
-        let pad_before = (target_playback_left - after_badge_x).max(0.0);
-        ui.add_space(pad_before);
-
-        if step_button(
-            ui,
-            icons,
-            Icon::SkipBack,
-            view.enabled,
-            "First frame (Home)",
-        ) {
-            action = Some(TransportAction::Home);
-        }
-        if step_button(
-            ui,
-            icons,
-            Icon::StepBack10,
-            view.enabled,
-            "Back 10 (Shift+Left)",
-        ) {
-            action = Some(TransportAction::Back(STEP_LARGE));
-        }
-        if step_button(ui, icons, Icon::StepBack, view.enabled, "Back 1 (Left / ,)") {
-            action = Some(TransportAction::Back(STEP_SMALL));
-        }
-        if play_button(ui, icons, view) {
-            action = Some(TransportAction::TogglePlay);
-        }
-        if step_button(
-            ui,
-            icons,
-            Icon::StepForward,
-            view.enabled,
-            "Forward 1 (Right / .)",
-        ) {
-            action = Some(TransportAction::Fwd(STEP_SMALL));
-        }
-        if step_button(
-            ui,
-            icons,
-            Icon::StepForward10,
-            view.enabled,
-            "Forward 10 (Shift+Right)",
-        ) {
-            action = Some(TransportAction::Fwd(STEP_LARGE));
-        }
-        if step_button(
-            ui,
-            icons,
-            Icon::SkipForward,
-            view.enabled,
-            "Last frame (End)",
-        ) {
-            action = Some(TransportAction::End);
-        }
-
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let slider = egui::Slider::new(&mut new_scale, 0.0..=1.0)
-                .show_value(false)
-                .min_decimals(0)
-                .max_decimals(2);
-            let slider_resp = ui.add_enabled(view.enabled, slider.fixed_decimals(2));
-            if slider_resp.changed() {
-                action = Some(TransportAction::ScaleChanged(new_scale));
+            let trim_color = if view.trim_mode {
+                theme::ACCENT
+            } else {
+                Color32::WHITE
+            };
+            if icons
+                .ui(
+                    ui,
+                    Icon::Scissors,
+                    20.0,
+                    trim_color,
+                    Vec2::new(STEP_BUTTON_W, STEP_BUTTON_H),
+                    false,
+                )
+                .on_hover_text("Enable trim mode — gate the active frame range with yellow handles")
+                .clicked()
+            {
+                action = Some(TransportAction::ToggleTrim);
             }
+            ui.add_space(BUTTON_GAP);
+            let after_trim_x = ui.cursor().left();
+
+            let target_playback_left = row_center - ROW_WIDTH * 0.5;
+            let pad_before = (target_playback_left - after_trim_x).max(0.0);
+            ui.add_space(pad_before);
+
+            if step_button(
+                ui,
+                icons,
+                Icon::SkipBack,
+                view.enabled,
+                "First frame (Home)",
+            ) {
+                action = Some(TransportAction::Home);
+            }
+            if step_button(
+                ui,
+                icons,
+                Icon::StepBack10,
+                view.enabled,
+                "Back 10 (Shift+Left)",
+            ) {
+                action = Some(TransportAction::Back(STEP_LARGE));
+            }
+            if step_button(ui, icons, Icon::StepBack, view.enabled, "Back 1 (Left / ,)") {
+                action = Some(TransportAction::Back(STEP_SMALL));
+            }
+            if play_button(ui, icons, view) {
+                action = Some(TransportAction::TogglePlay);
+            }
+            if step_button(
+                ui,
+                icons,
+                Icon::StepForward,
+                view.enabled,
+                "Forward 1 (Right / .)",
+            ) {
+                action = Some(TransportAction::Fwd(STEP_SMALL));
+            }
+            if step_button(
+                ui,
+                icons,
+                Icon::StepForward10,
+                view.enabled,
+                "Forward 10 (Shift+Right)",
+            ) {
+                action = Some(TransportAction::Fwd(STEP_LARGE));
+            }
+            if step_button(
+                ui,
+                icons,
+                Icon::SkipForward,
+                view.enabled,
+                "Last frame (End)",
+            ) {
+                action = Some(TransportAction::End);
+            }
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let slider = egui::Slider::new(&mut new_scale, 0.0..=1.0)
+                    .show_value(false)
+                    .min_decimals(0)
+                    .max_decimals(2);
+                let slider_resp = ui.add_enabled(view.enabled, slider.fixed_decimals(2));
+                if slider_resp.changed() {
+                    action = Some(TransportAction::ScaleChanged(new_scale));
+                }
+            });
         });
     });
 
