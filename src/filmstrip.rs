@@ -10,6 +10,46 @@ use crate::thumbs::ThumbCache;
 pub const TRIM_HANDLE_W: f32 = 22.0;
 pub const TRIM_RAIL_H: f32 = 4.0;
 
+/// Compute the minimal stride that fits the entire clip in the viewport.
+/// Returns the smallest stride where `ceil(total_frames / stride)` thumbs fit
+/// within `floor(viewport_width / pitch)` positions.
+pub fn fit_clip_stride(total_frames: usize, viewport_width: f32, pitch: f32) -> usize {
+    if total_frames == 0 || pitch <= 0.0 {
+        return 1;
+    }
+    let positions = (viewport_width / pitch).floor().max(1.0) as usize;
+    ((total_frames as f32) / (positions as f32)).ceil().max(1.0) as usize
+}
+
+/// Given a slider position in [0.0, 1.0], interpolate (log scale) between
+/// `fit_clip_stride` (slider = 0.0) and 1 (slider = 1.0).
+pub fn stride_from_scale(
+    scale: f32,
+    total_frames: usize,
+    viewport_width: f32,
+    pitch: f32,
+) -> usize {
+    let max_stride = fit_clip_stride(total_frames, viewport_width, pitch);
+    if max_stride <= 1 {
+        return 1;
+    }
+    let scale_clamped = scale.clamp(0.0, 1.0);
+    let log_min = 0.0_f32;
+    let log_max = (max_stride as f32).ln();
+    let log_val = log_max - scale_clamped * (log_max - log_min);
+    log_val.exp().round().max(1.0) as usize
+}
+
+/// Convert a frame index to a strip position given the current stride.
+pub fn frame_to_strip_pos(frame: usize, stride: usize) -> usize {
+    frame / stride.max(1)
+}
+
+/// Convert a strip position to a frame index given the current stride.
+pub fn strip_pos_to_frame(strip_pos: usize, stride: usize) -> usize {
+    strip_pos * stride.max(1)
+}
+
 /// Which of the two trim handles a drag is affecting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrimHandle {
@@ -124,20 +164,6 @@ impl FilmstripGeometry {
             Pos2::new(center_x + TRIM_HANDLE_W * 0.5, bottom),
         )
     }
-
-    /// Pointer-x within the content coord system (already relative to origin)
-    /// mapped to a frame index, snapped to whichever thumb the pointer is over
-    /// (nearest boundary for gap positions).
-    pub fn x_to_frame(&self, x_content: f32, total_frames: usize) -> usize {
-        if total_frames == 0 {
-            return 0;
-        }
-        let last = total_frames - 1;
-        let pitch = self.pitch().max(1.0);
-        let x_adj = (x_content - self.left_pad).max(0.0);
-        let idx = (x_adj / pitch).floor().max(0.0) as usize;
-        idx.min(last)
-    }
 }
 
 /// Output of one draw pass of the filmstrip.
@@ -167,6 +193,7 @@ pub struct FilmstripDrawParams<'a> {
     pub thumbs: &'a mut ThumbCache,
     /// Accumulator for scroll-to-scrub, converted to frame steps.
     pub scroll_accumulator: &'a mut f32,
+    pub stride: usize,
 }
 
 /// Draw the filmstrip inside `ui`, returning a request for the caller to seek
@@ -182,6 +209,7 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
         trim_end,
         thumbs,
         scroll_accumulator,
+        stride,
     } = params;
 
     let mut action = FilmstripAction::default();
@@ -200,19 +228,14 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
     // there's nothing to trim; render just the plain strip in that case.
     let trim_enabled = trim_mode && total_frames >= 2;
 
-    let content_width = geom.total_width(total_frames);
+    let stride = stride.max(1);
+    let strip_positions = ((total_frames as f32) / (stride as f32)).ceil() as usize;
+    let content_width = geom.total_width(strip_positions);
     let row_h = geom.row_height();
     let want_scroll = current_frame != prev_current_frame;
 
-    // scroll_to_rect writes state.offset in ScrollArea::end, AFTER add_contents
-    // has painted. That leaves the current-frame highlight one pitch to the
-    // right of viewport center every time current_frame advances (a persistent
-    // visible offset during playback, one flicker on each manual step). Pre-set
-    // the horizontal offset so the paint inside show_viewport uses the new
-    // state.offset. Target math is a pure function of current_frame — with
-    // left_pad = viewport.width() / 2, the offset that centers thumb i is
-    // i * pitch + thumb_w / 2.
-    let target_offset = current_frame as f32 * geom.pitch() + geom.thumb_w * 0.5;
+    let strip_pos = frame_to_strip_pos(current_frame, stride);
+    let target_offset = strip_pos as f32 * geom.pitch() + geom.thumb_w * 0.5;
 
     ScrollArea::horizontal()
         .id_salt("frammpeg-filmstrip")
@@ -238,17 +261,25 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
 
             let x0 = viewport.min.x;
             let x1 = viewport.max.x;
-            let visible = geom.visible_range(x0, x1, total_frames);
-            let prefetch = geom.prefetch_range(visible, total_frames);
+            let visible_strip = geom.visible_range(x0, x1, strip_positions);
 
-            // Kick off decodes for prefetch range that we haven't seen yet.
+            let visible_frames = visible_strip.map(|(lo, hi)| {
+                let lo_frame = strip_pos_to_frame(lo, stride);
+                let hi_frame = strip_pos_to_frame(hi, stride).min(total_frames.saturating_sub(1));
+                (lo_frame, hi_frame)
+            });
+
+            let prefetch = geom.prefetch_range(visible_frames, total_frames);
+
             if let Some((lo, hi)) = prefetch {
-                for idx in lo..=hi {
-                    thumbs.request(idx);
+                let mut frame = lo;
+                while frame <= hi {
+                    thumbs.request(frame);
+                    frame = frame.saturating_add(stride).min(hi.saturating_add(1));
                 }
             }
 
-            if let Some((lo, hi)) = visible {
+            if let Some((lo, hi)) = visible_strip {
                 paint_thumbs(
                     &painter,
                     content_rect.min,
@@ -258,11 +289,19 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
                     current_frame,
                     (*trim_start, *trim_end),
                     trim_enabled,
+                    stride,
                 );
             }
 
             if trim_enabled {
-                paint_trim_rails(&painter, content_rect.min, geom, (*trim_start, *trim_end));
+                let trim_start_pos = frame_to_strip_pos(*trim_start, stride);
+                let trim_end_pos = frame_to_strip_pos(*trim_end, stride);
+                paint_trim_rails(
+                    &painter,
+                    content_rect.min,
+                    geom,
+                    (trim_start_pos, trim_end_pos),
+                );
             }
 
             if want_scroll {
@@ -278,6 +317,7 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
                     total_frames,
                     trim_start,
                     trim_end,
+                    stride,
                     &mut action,
                 );
             }
@@ -290,6 +330,7 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
                     total_frames,
                     (*trim_start, *trim_end),
                     trim_enabled,
+                    stride,
                     &mut action,
                 );
             }
@@ -333,13 +374,17 @@ fn paint_thumbs(
     current_frame: usize,
     trim: (usize, usize),
     trim_enabled: bool,
+    stride: usize,
 ) {
     let (lo, hi) = range;
     let (trim_start, trim_end) = trim;
-    for idx in lo..=hi {
-        let rect = geom.thumb_rect(origin, idx);
-        let selected = idx == current_frame;
-        let in_trim = !trim_enabled || (idx >= trim_start && idx <= trim_end);
+    let stride = stride.max(1);
+    let current_strip_pos = frame_to_strip_pos(current_frame, stride);
+    for strip_pos in lo..=hi {
+        let frame_idx = strip_pos_to_frame(strip_pos, stride);
+        let rect = geom.thumb_rect(origin, strip_pos);
+        let selected = strip_pos == current_strip_pos;
+        let in_trim = !trim_enabled || (frame_idx >= trim_start && frame_idx <= trim_end);
         let bg = if selected {
             theme::WIDGET_ACTIVE
         } else {
@@ -347,7 +392,7 @@ fn paint_thumbs(
         };
         painter.rect_filled(rect, CornerRadius::same(2), bg);
 
-        if let Some(tex) = thumbs.get(idx) {
+        if let Some(tex) = thumbs.get(frame_idx) {
             let [tw, th] = tex.size();
             let tw = tw as f32;
             let th = th as f32;
@@ -394,7 +439,7 @@ fn paint_thumbs(
             egui::StrokeKind::Outside,
         );
 
-        if (idx + 1) % geom.label_every_n.max(1) == 0 || idx == current_frame {
+        if (strip_pos + 1) % geom.label_every_n.max(1) == 0 || selected {
             let label_pos = Pos2::new(rect.center().x, rect.bottom() + geom.label_h * 0.5);
             let color = if selected {
                 theme::ACCENT
@@ -406,7 +451,7 @@ fn paint_thumbs(
             painter.text(
                 label_pos,
                 Align2::CENTER_CENTER,
-                format!("{}", idx + 1),
+                format!("{}", frame_idx + 1),
                 FontId::monospace(10.0),
                 color,
             );
@@ -483,11 +528,15 @@ fn handle_trim_interaction(
     total_frames: usize,
     trim_start: &mut usize,
     trim_end: &mut usize,
+    stride: usize,
     action: &mut FilmstripAction,
 ) -> bool {
     let last = total_frames.saturating_sub(1);
-    let start_rect = geom.trim_handle_rect(content_rect.min, *trim_start, TrimHandle::Start);
-    let end_rect = geom.trim_handle_rect(content_rect.min, *trim_end, TrimHandle::End);
+    let stride = stride.max(1);
+    let start_strip_pos = frame_to_strip_pos(*trim_start, stride);
+    let end_strip_pos = frame_to_strip_pos(*trim_end, stride);
+    let start_rect = geom.trim_handle_rect(content_rect.min, start_strip_pos, TrimHandle::Start);
+    let end_rect = geom.trim_handle_rect(content_rect.min, end_strip_pos, TrimHandle::End);
 
     let start_id = ui.id().with("frammpeg-trim-start");
     let end_id = ui.id().with("frammpeg-trim-end");
@@ -514,18 +563,26 @@ fn handle_trim_interaction(
 
     if start_resp.dragged() {
         if let Some(pos) = start_resp.interact_pointer_pos() {
-            let x = pos.x - content_rect.min.x;
-            let idx = geom.x_to_frame(x, total_frames);
-            let clamped_hi = trim_end.saturating_sub(1);
-            *trim_start = idx.min(clamped_hi);
+            let x = pos.x - content_rect.min.x - geom.left_pad;
+            let pitch = geom.pitch();
+            if pitch > 0.0 {
+                let strip_idx = (x / pitch).floor().max(0.0) as usize;
+                let frame = strip_pos_to_frame(strip_idx, stride).min(last);
+                let clamped_hi = trim_end.saturating_sub(1);
+                *trim_start = frame.min(clamped_hi);
+            }
         }
     }
     if end_resp.dragged() {
         if let Some(pos) = end_resp.interact_pointer_pos() {
-            let x = pos.x - content_rect.min.x;
-            let idx = geom.x_to_frame(x, total_frames);
-            let clamped_lo = trim_start.saturating_add(1);
-            *trim_end = idx.max(clamped_lo).min(last);
+            let x = pos.x - content_rect.min.x - geom.left_pad;
+            let pitch = geom.pitch();
+            if pitch > 0.0 {
+                let strip_idx = (x / pitch).floor().max(0.0) as usize;
+                let frame = strip_pos_to_frame(strip_idx, stride).min(last);
+                let clamped_lo = trim_start.saturating_add(1);
+                *trim_end = frame.max(clamped_lo).min(last);
+            }
         }
     }
 
@@ -543,6 +600,7 @@ fn handle_trim_interaction(
         || end_resp.clicked()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_seek_interaction(
     response: &Response,
     content_rect: Rect,
@@ -550,6 +608,7 @@ fn handle_seek_interaction(
     total_frames: usize,
     trim: (usize, usize),
     trim_enabled: bool,
+    stride: usize,
     action: &mut FilmstripAction,
 ) {
     if total_frames == 0 {
@@ -559,16 +618,17 @@ fn handle_seek_interaction(
     if pitch <= 0.0 {
         return;
     }
-    let last = total_frames - 1;
+    let stride = stride.max(1);
+    let last = total_frames.saturating_sub(1);
     if response.clicked() || response.dragged() {
         if let Some(pos) = response.interact_pointer_pos() {
             let x = (pos.x - content_rect.min.x - geom.left_pad) / pitch;
-            let idx = (x.floor() as isize).max(0) as usize;
-            let clamped = idx.min(last);
+            let strip_idx = (x.floor() as isize).max(0) as usize;
+            let frame = strip_pos_to_frame(strip_idx, stride).min(last);
             let target = if trim_enabled {
-                clamped.clamp(trim.0, trim.1)
+                frame.clamp(trim.0, trim.1)
             } else {
-                clamped
+                frame
             };
             action.seek_to = Some(target);
         }
@@ -689,22 +749,60 @@ mod tests {
     }
 
     #[test]
-    fn x_to_frame_snaps_to_thumb_at_start() {
-        let g = geom();
-        assert_eq!(g.x_to_frame(0.0, 100), 0);
-        // Pointer just inside thumb 3 (3 * pitch = 300, +5 -> still index 3).
-        assert_eq!(g.x_to_frame(3.0 * g.pitch() + 5.0, 100), 3);
+    fn fit_clip_stride_math() {
+        let pitch = 100.0;
+        let viewport_width = 1000.0;
+        let total_frames = 500;
+        let stride = fit_clip_stride(total_frames, viewport_width, pitch);
+        let positions = (viewport_width / pitch).floor() as usize;
+        let thumbs_needed = ((total_frames as f32) / (stride as f32)).ceil() as usize;
+        assert!(thumbs_needed <= positions);
+        if stride > 1 {
+            let smaller_stride = stride - 1;
+            let thumbs_with_smaller =
+                ((total_frames as f32) / (smaller_stride as f32)).ceil() as usize;
+            assert!(thumbs_with_smaller > positions);
+        }
     }
 
     #[test]
-    fn x_to_frame_clamps_past_end() {
-        let g = geom();
-        assert_eq!(g.x_to_frame(1e6, 10), 9);
+    fn stride_from_slider_position_endpoints() {
+        let total_frames = 500;
+        let viewport_width = 1000.0;
+        let pitch = 100.0;
+        let max_stride = fit_clip_stride(total_frames, viewport_width, pitch);
+        assert_eq!(
+            stride_from_scale(0.0, total_frames, viewport_width, pitch),
+            max_stride
+        );
+        assert_eq!(
+            stride_from_scale(1.0, total_frames, viewport_width, pitch),
+            1
+        );
     }
 
     #[test]
-    fn x_to_frame_empty_video() {
-        let g = geom();
-        assert_eq!(g.x_to_frame(100.0, 0), 0);
+    fn stride_from_slider_position_midpoint() {
+        let total_frames = 500;
+        let viewport_width = 1000.0;
+        let pitch = 100.0;
+        let max_stride = fit_clip_stride(total_frames, viewport_width, pitch);
+        let mid_stride = stride_from_scale(0.5, total_frames, viewport_width, pitch);
+        assert!(mid_stride > 1);
+        assert!(mid_stride < max_stride);
+    }
+
+    #[test]
+    fn strip_position_of_frame() {
+        assert_eq!(frame_to_strip_pos(120, 10), 12);
+        assert_eq!(frame_to_strip_pos(0, 10), 0);
+        assert_eq!(frame_to_strip_pos(125, 10), 12);
+    }
+
+    #[test]
+    fn frame_of_strip_position() {
+        assert_eq!(strip_pos_to_frame(12, 10), 120);
+        assert_eq!(strip_pos_to_frame(0, 10), 0);
+        assert_eq!(strip_pos_to_frame(5, 1), 5);
     }
 }

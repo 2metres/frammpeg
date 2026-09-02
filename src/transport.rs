@@ -13,24 +13,27 @@ const BUTTON_GAP: f32 = 4.0;
 const STEP_BUTTON_COUNT: f32 = 6.0;
 const ROW_WIDTH: f32 = STEP_BUTTON_W * STEP_BUTTON_COUNT + PLAY_BUTTON_W + BUTTON_GAP * 6.0;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TransportAction {
     Home,
     Back(usize),
     Fwd(usize),
     End,
     TogglePlay,
+    ScaleChanged(f32),
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct TransportView {
     pub enabled: bool,
     pub playing: bool,
+    pub strip_scale: f32,
 }
 
 /// Draw the centered transport button row. Returns the first pressed action.
 pub fn draw(ui: &mut Ui, view: TransportView) -> Option<TransportAction> {
     let mut action: Option<TransportAction> = None;
+    let mut new_scale = view.strip_scale;
 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = BUTTON_GAP;
@@ -56,6 +59,18 @@ pub fn draw(ui: &mut Ui, view: TransportView) -> Option<TransportAction> {
         }
         if step_button(ui, "\u{23ED}", view.enabled, "Last frame (End)") {
             action = Some(TransportAction::End);
+        }
+
+        ui.add_space(BUTTON_GAP * 2.0);
+        ui.label(RichText::new("Zoom").size(11.0).color(theme::TEXT_MUTED));
+        ui.add_space(BUTTON_GAP);
+        let slider = egui::Slider::new(&mut new_scale, 0.0..=1.0)
+            .show_value(false)
+            .min_decimals(0)
+            .max_decimals(2);
+        let slider_resp = ui.add_enabled(view.enabled, slider.fixed_decimals(2));
+        if slider_resp.changed() {
+            action = Some(TransportAction::ScaleChanged(new_scale));
         }
     });
 

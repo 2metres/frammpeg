@@ -85,6 +85,8 @@ struct VideoState {
     trim_end: usize,
     trim_edit: Option<TrimEditSnapshot>,
     scroll_accumulator: f32,
+    strip_stride: usize,
+    strip_scale: f32,
 }
 
 struct NoteEditSnapshot {
@@ -151,6 +153,8 @@ impl VideoState {
             trim_end,
             trim_edit: None,
             scroll_accumulator: 0.0,
+            strip_stride: 1,
+            strip_scale: 1.0,
         }
     }
 
@@ -615,7 +619,7 @@ impl FrammpegApp {
     fn draw_bottom_panel_ready(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
 
-        let (enabled, playing, current_frame, prev_current_frame, total_frames) = {
+        let (enabled, playing, current_frame, prev_current_frame, total_frames, strip_scale) = {
             let Phase::Ready(v) = &self.phase else {
                 return;
             };
@@ -625,6 +629,7 @@ impl FrammpegApp {
                 v.current_frame,
                 v.prev_current_frame,
                 v.total_frames,
+                v.strip_scale,
             )
         };
 
@@ -632,7 +637,14 @@ impl FrammpegApp {
             // Transport row (centered).
             let action = ui
                 .allocate_ui(Vec2::new(ui.available_width(), TRANSPORT_ROW_H), |ui| {
-                    transport::draw(ui, TransportView { enabled, playing })
+                    transport::draw(
+                        ui,
+                        TransportView {
+                            enabled,
+                            playing,
+                            strip_scale,
+                        },
+                    )
                 })
                 .inner;
             if let Some(a) = action {
@@ -645,6 +657,15 @@ impl FrammpegApp {
             let strip_top = ui.cursor().top();
             if let Phase::Ready(v) = &mut self.phase {
                 v.thumbs.poll(&ctx);
+                let viewport_width = ui.available_width();
+                let pitch = v.filmstrip_geom.pitch();
+                let stride = filmstrip::stride_from_scale(
+                    v.strip_scale,
+                    v.total_frames,
+                    viewport_width,
+                    pitch,
+                );
+                v.strip_stride = stride;
                 let action = filmstrip::draw(
                     ui,
                     FilmstripDrawParams {
@@ -657,6 +678,7 @@ impl FrammpegApp {
                         trim_end: &mut v.trim_end,
                         thumbs: &mut v.thumbs,
                         scroll_accumulator: &mut v.scroll_accumulator,
+                        stride,
                     },
                 );
                 if let Some(which) = action.trim_drag_started {
@@ -712,31 +734,39 @@ impl FrammpegApp {
         let Phase::Ready(v) = &mut self.phase else {
             return;
         };
-        if v.total_frames == 0 {
-            return;
-        }
-        let (lo, hi) = trim_range(v);
         match action {
-            TransportAction::Home => {
-                v.set_playing(false);
-                v.seek(lo);
+            TransportAction::ScaleChanged(new_scale) => {
+                v.strip_scale = new_scale;
             }
-            TransportAction::End => {
-                v.set_playing(false);
-                v.seek(hi);
-            }
-            TransportAction::Back(n) => {
-                v.set_playing(false);
-                let start = v.current_frame.clamp(lo, hi);
-                v.seek(start.saturating_sub(n).max(lo));
-            }
-            TransportAction::Fwd(n) => {
-                v.set_playing(false);
-                let start = v.current_frame.clamp(lo, hi);
-                v.seek((start + n).min(hi));
-            }
-            TransportAction::TogglePlay => {
-                v.set_playing(!v.playing);
+            _ => {
+                if v.total_frames == 0 {
+                    return;
+                }
+                let (lo, hi) = trim_range(v);
+                match action {
+                    TransportAction::Home => {
+                        v.set_playing(false);
+                        v.seek(lo);
+                    }
+                    TransportAction::End => {
+                        v.set_playing(false);
+                        v.seek(hi);
+                    }
+                    TransportAction::Back(n) => {
+                        v.set_playing(false);
+                        let start = v.current_frame.clamp(lo, hi);
+                        v.seek(start.saturating_sub(n).max(lo));
+                    }
+                    TransportAction::Fwd(n) => {
+                        v.set_playing(false);
+                        let start = v.current_frame.clamp(lo, hi);
+                        v.seek((start + n).min(hi));
+                    }
+                    TransportAction::TogglePlay => {
+                        v.set_playing(!v.playing);
+                    }
+                    TransportAction::ScaleChanged(_) => unreachable!(),
+                }
             }
         }
     }
