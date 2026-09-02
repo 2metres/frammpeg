@@ -586,50 +586,52 @@ impl FrammpegApp {
                     }
                 }
 
-                ui.separator();
-                if ui
-                    .add(egui::Button::new("Export").frame(false))
-                    .on_hover_text("Write each moment's buffer + annotated frame to disk")
-                    .clicked()
-                {
-                    v.commit_text_edit();
-                    v.finalize_pending_edits();
-                    match export::export_all(
-                        &v.moments,
-                        &v.annotations,
-                        v.total_frames,
-                        v.trim_start,
-                        v.trim_end,
-                        &v.session.frames,
-                        &v.session.export,
-                        &v.video_path,
-                    ) {
-                        Ok(res) => {
-                            v.last_export_msg = Some((
-                                Instant::now(),
-                                format!("Exported {} moment(s)", res.moments_written),
-                            ));
-                        }
-                        Err(e) => {
-                            v.last_export_msg =
-                                Some((Instant::now(), format!("export failed: {e}")));
-                        }
-                    }
-                }
-                if ui
-                    .add(egui::Button::new("Copy export path").frame(false))
-                    .on_hover_text("Copy the export folder path to the clipboard")
-                    .clicked()
-                {
-                    match arboard::Clipboard::new()
-                        .and_then(|mut cb| cb.set_text(v.session.export.display().to_string()))
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add(egui::Button::new("Copy export path").frame(true))
+                        .on_hover_text("Copy the export folder path to the clipboard")
+                        .clicked()
                     {
-                        Ok(()) => v.last_copy_at = Some(Instant::now()),
-                        Err(e) => {
-                            v.last_export_msg = Some((Instant::now(), format!("clipboard: {e}")));
+                        match arboard::Clipboard::new()
+                            .and_then(|mut cb| cb.set_text(v.session.export.display().to_string()))
+                        {
+                            Ok(()) => v.last_copy_at = Some(Instant::now()),
+                            Err(e) => {
+                                v.last_export_msg =
+                                    Some((Instant::now(), format!("clipboard: {e}")));
+                            }
                         }
                     }
-                }
+                    if ui
+                        .add(egui::Button::new("Export").frame(true))
+                        .on_hover_text("Write each moment's buffer + annotated frame to disk")
+                        .clicked()
+                    {
+                        v.commit_text_edit();
+                        v.finalize_pending_edits();
+                        match export::export_all(
+                            &v.moments,
+                            &v.annotations,
+                            v.total_frames,
+                            v.trim_start,
+                            v.trim_end,
+                            &v.session.frames,
+                            &v.session.export,
+                            &v.video_path,
+                        ) {
+                            Ok(res) => {
+                                v.last_export_msg = Some((
+                                    Instant::now(),
+                                    format!("Exported {} moment(s)", res.moments_written),
+                                ));
+                            }
+                            Err(e) => {
+                                v.last_export_msg =
+                                    Some((Instant::now(), format!("export failed: {e}")));
+                            }
+                        }
+                    }
+                });
             }
         });
     }
