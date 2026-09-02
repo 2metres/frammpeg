@@ -1,6 +1,28 @@
-# Project Instructions for AI Agents
+# Frammpeg — Instructions for AI Agents
 
 This file provides instructions and context for AI coding agents working on this project.
+
+## About Frammpeg
+
+**Frammpeg** is a portable Rust desktop tool for debugging HTML/CSS animation bugs. A user records a buggy animation, drops the video into Frammpeg, scrubs frame-by-frame, marks "notable" frames, annotates them with shapes and notes, and exports the annotated frames to disk. They then paste the export path into an AI assistant chat and the assistant reads the PNGs to help diagnose.
+
+Frammpeg is deliberately not an MCP server, not a Claude Code plugin, and has no built-in AI integration. The human is the courier between Frammpeg and the assistant. See "Non-goals" in the epic for the full list of what this tool is *not*.
+
+**Forever-lived vision and design record:**
+
+```bash
+bd show frmpg-0
+```
+
+That epic ticket carries the workflow, stack decisions, alternatives considered (and why rejected), and the export directory layout. Read it before making architectural choices.
+
+**Stack:**
+
+- Rust
+- [egui](https://github.com/emilk/egui) via `eframe` for the UI
+- [ffmpeg-sidecar](https://github.com/nathanbabcock/ffmpeg-sidecar) for portable frame extraction (no `brew install` prerequisite)
+
+**Current status:** pre-alpha. `frmpg-0.bootstrap` is the next actionable ticket — project scaffold and shell.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->
 ## Beads Issue Tracker
@@ -60,18 +82,46 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Build & Test
 
-_Add your build and test commands here_
+Nothing to build yet — pre-alpha, see `bd show frmpg-0.bootstrap`.
+
+Once the scaffold lands:
 
 ```bash
-# Example:
-# npm install
-# npm test
+cargo run --release           # launch the desktop app
+cargo test                    # unit tests
+cargo clippy -- -D warnings   # lint
 ```
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+Single-binary Rust desktop app, three layers:
+
+- **UI** (`egui` / `eframe`): dropzone → workspace (viewport, timeline scrubber, moments panel, tool palette)
+- **Extraction** (`ffmpeg-sidecar`): manages a portable ffmpeg binary; decodes video → PNG frames on disk
+- **Annotation model** (in-memory JSON): shapes stored per-frame; burned into pixels on export
+
+**Disk layout:**
+
+- Session dir: `~/.frammpeg/sessions/<timestamp>/`
+- Export dir: `<session>/export/moment-NN/` — buffer frames as clean PNGs, noted frame as `frame-NNNN-annotated.png` with shapes burned in, `note.md` per moment
+
+Full design record and rationale live in `bd show frmpg-0`.
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- **All task tracking in `bd`.** The forever-lived vision is `frmpg-0`. Sub-issues use dot-notation (`frmpg-0.bootstrap`, `frmpg-0.mvp`, etc). No markdown TODO lists.
+- **Non-goals are load-bearing.** They're listed in the `frmpg-0` body. Challenge any scope that contradicts them before adding it.
+- **Portability is a requirement, not a preference.** Anything that assumes `brew install X` or a system dependency needs a portable replacement path called out explicitly.
+- **Rust style:** `cargo fmt` on save, `cargo clippy -- -D warnings` clean before commit.
+
+## Subagent Roles
+
+When dispatching subagents, each one has ONE role. Do not mix roles in one run.
+
+- **Implementer** — writes code against a specific bd ticket (or bundled tickets). Runs quality gates. Does NOT file new tickets for issues they notice outside their scope; they flag them in the handoff for the orchestrator.
+- **Reviewer** — reads a diff, verifies claims, finds defects. Reports findings inline (or via `ReportFindings` where available). Does NOT edit code to fix what they find.
+- **Polish agent** — sweeps a target area for defects, dead code, inconsistencies, small bugs, or missed spec items. Files each finding as a nested bd task under a parent polish ticket via `bd create --parent=<parent-id>`. Does NOT implement fixes in the same run.
+
+Why: separating discovery from fix keeps each finding reviewable, keeps the orchestrator in charge of prioritization, prevents "helpful" polish-pass rewrites that expand scope silently, and produces a durable bd trail. A polish agent that also implements can mask its own findings by fixing them inline without a ticket.
+
+How to apply: dispatch prompts for reviewers and polish-sweep agents must include an explicit **"you file tickets, you do NOT edit code"** clause. Implementers are dispatched afterward against the filed tickets — individually or bundled.
