@@ -172,10 +172,17 @@ impl VideoState {
         let elapsed = now.duration_since(prev) + self.play_leftover;
         let (frames, leftover) = transport::advance_frames(self.fps, elapsed);
         if frames > 0 {
-            let next = transport::step_play(self.current_frame, frames, self.total_frames);
+            let (next, hit_end) =
+                transport::step_play(self.current_frame, frames, self.total_frames);
             if next != self.current_frame {
                 self.commit_text_edit();
                 self.current_frame = next;
+            }
+            if hit_end {
+                self.playing = false;
+                self.last_play_tick = None;
+                self.play_leftover = Duration::ZERO;
+                return;
             }
         }
         self.last_play_tick = Some(now);
