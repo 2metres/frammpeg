@@ -702,4 +702,56 @@ mod tests {
         }
         assert_eq!((ts, te), (5, 80));
     }
+
+    #[test]
+    fn deleting_moment_cascade_deletes_annotations_and_undoes_in_order() {
+        let mut anns: HashMap<usize, Vec<Annotation>> = HashMap::new();
+        let mut moms: Vec<Moment> = vec![moment(3, "note", 5)];
+        let mut h = History::new(HISTORY_CAP);
+
+        anns.insert(3, vec![rect(10.0), text("label")]);
+
+        for (idx, ann) in anns[&3].iter().enumerate().rev() {
+            h.record(Action::AnnotationDeleted {
+                frame: 3,
+                index: idx,
+                annotation: ann.clone(),
+            });
+        }
+        anns.remove(&3);
+
+        let removed = moms.remove(0);
+        h.record(Action::MomentDeleted {
+            index: 0,
+            moment: removed,
+        });
+
+        assert!(!anns.contains_key(&3), "annotations should be deleted");
+        assert!(moms.is_empty(), "moment should be deleted");
+
+        call!(h.undo(&mut anns, &mut moms)).unwrap();
+        assert_eq!(moms.len(), 1, "moment restored");
+        assert_eq!(moms[0].note, "note");
+        assert!(
+            !anns.contains_key(&3),
+            "annotations still empty after moment undo"
+        );
+
+        call!(h.undo(&mut anns, &mut moms)).unwrap();
+        assert_eq!(
+            anns.get(&3).map(|l| l.len()),
+            Some(1),
+            "first annotation restored"
+        );
+
+        call!(h.undo(&mut anns, &mut moms)).unwrap();
+        assert_eq!(
+            anns.get(&3).map(|l| l.len()),
+            Some(2),
+            "second annotation restored"
+        );
+        let list = anns.get(&3).unwrap();
+        assert_eq!(list[0], rect(10.0));
+        assert_eq!(list[1], text("label"));
+    }
 }
