@@ -391,6 +391,7 @@ pub struct FrammpegApp {
     sessions_root: Option<PathBuf>,
     phase: Phase,
     icons: IconCache,
+    last_title: String,
 }
 
 impl FrammpegApp {
@@ -401,6 +402,7 @@ impl FrammpegApp {
             sessions_root,
             phase: Phase::Empty,
             icons: IconCache::new(),
+            last_title: String::new(),
         }
     }
 
@@ -501,7 +503,6 @@ impl FrammpegApp {
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
-        let header = self.header_label();
         let Self { phase, icons, .. } = self;
         ui.horizontal(|ui| {
             ui.add_space(4.0);
@@ -616,10 +617,6 @@ impl FrammpegApp {
                     }
                 }
             }
-
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.label(RichText::new(&header).color(theme::TEXT_MUTED).small());
-            });
         });
     }
 
@@ -1420,6 +1417,31 @@ impl eframe::App for FrammpegApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll_extraction(&ctx);
+
+        let new_title = match &self.phase {
+            Phase::Empty => "Frammpeg".to_string(),
+            Phase::Extracting(s) => {
+                let filename = s
+                    .video_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("video");
+                format!("Frammpeg — {} (extracting…)", filename)
+            }
+            Phase::Ready(v) => {
+                let filename = v
+                    .video_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("video");
+                format!("{} — Frammpeg", filename)
+            }
+            Phase::Error(_) => "Frammpeg — error".to_string(),
+        };
+        if new_title != self.last_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(new_title.clone()));
+            self.last_title = new_title;
+        }
 
         // Snapshot prev_current_frame at the start of the frame so the
         // filmstrip can auto-scroll on any change made this frame.
