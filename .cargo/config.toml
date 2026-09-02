@@ -1,0 +1,8 @@
+[build]
+# Shared target directory across git worktrees to avoid recompiling deps in
+# each worktree. This speeds up parallel builds significantly but may
+# occasionally have stale-cache issues if multiple worktrees rebuild the same
+# crate simultaneously (rare in practice).
+#
+# Alternative: set CARGO_TARGET_DIR=~/.frammpeg/target-shared in shell env.
+target-dir = "/Users/andrw/.frammpeg/target-shared"
