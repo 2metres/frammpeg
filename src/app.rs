@@ -533,7 +533,11 @@ impl FrammpegApp {
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .add(egui::Button::new("Copy export path").frame(true))
+                        .add(
+                            egui::Button::new("Copy export path")
+                                .frame(true)
+                                .min_size(egui::Vec2::new(0.0, 30.0)),
+                        )
                         .on_hover_text("Copy the export folder path to the clipboard")
                         .clicked()
                     {
@@ -548,7 +552,11 @@ impl FrammpegApp {
                         }
                     }
                     if ui
-                        .add(egui::Button::new("Export").frame(true))
+                        .add(
+                            egui::Button::new("Export")
+                                .frame(true)
+                                .min_size(egui::Vec2::new(0.0, 30.0)),
+                        )
                         .on_hover_text("Write each moment's buffer + annotated frame to disk")
                         .clicked()
                     {
