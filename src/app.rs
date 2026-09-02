@@ -37,7 +37,18 @@ fn tool_button(
     selected: bool,
 ) -> egui::Response {
     let color = if selected { theme::ACCENT } else { theme::TEXT };
-    icons.ui(ui, icon, TOOL_ICON_PT, color, TOOL_BUTTON_SIZE, false)
+    let bg = if selected {
+        theme::WIDGET_ACTIVE
+    } else {
+        Color32::TRANSPARENT
+    };
+    egui::Frame::new()
+        .fill(bg)
+        .corner_radius(CornerRadius::same(4))
+        .show(ui, |ui| {
+            icons.ui(ui, icon, TOOL_ICON_PT, color, TOOL_BUTTON_SIZE, false)
+        })
+        .inner
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1076,7 +1087,7 @@ impl FrammpegApp {
             .order(Order::Foreground)
             .fixed_pos(rect.min + Vec2::new(12.0, 12.0))
             .show(ui.ctx(), |ui| {
-                ui.vertical(|ui| {
+                ui.vertical_centered(|ui| {
                     if tool_button(ui, icons, Icon::Rectangle, v.tool == Tool::Rect)
                         .on_hover_text("Rectangle (click and drag on the frame)")
                         .clicked()
