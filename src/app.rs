@@ -238,6 +238,7 @@ impl VideoState {
                 } else {
                     *text = self.text_buffer.clone();
                     let recorded = ann_list[idx].clone();
+                    self.auto_mark_if_first_annotation(frame);
                     self.history.record(Action::AnnotationCreated {
                         frame,
                         index: idx,
@@ -247,6 +248,20 @@ impl VideoState {
             }
             self.text_buffer.clear();
         }
+    }
+
+    fn auto_mark_if_first_annotation(&mut self, frame: usize) {
+        if self.moments.iter().any(|m| m.frame_index == frame) {
+            return;
+        }
+        let moment = Moment {
+            frame_index: frame,
+            buffer: DEFAULT_BUFFER,
+            note: String::new(),
+        };
+        let index = self.moments.len();
+        self.moments.push(moment.clone());
+        self.history.record(Action::MomentCreated { index, moment });
     }
 
     fn after_history_change(&mut self, action: &Action) {
@@ -1002,6 +1017,7 @@ impl FrammpegApp {
                             let list = v.annotations.entry(current).or_default();
                             let index = list.len();
                             list.push(annotation.clone());
+                            v.auto_mark_if_first_annotation(current);
                             v.history.record(Action::AnnotationCreated {
                                 frame: current,
                                 index,
