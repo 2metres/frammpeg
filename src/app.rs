@@ -628,6 +628,8 @@ impl FrammpegApp {
             let strip_top = ui.cursor().top();
             if let Phase::Ready(v) = &mut self.phase {
                 v.thumbs.poll(&ctx);
+                let delta = v.current_frame.abs_diff(prev_current_frame);
+                let instant_scroll = delta > 30;
                 let action = filmstrip::draw(
                     ui,
                     FilmstripDrawParams {
@@ -639,6 +641,7 @@ impl FrammpegApp {
                         trim_start: &mut v.trim_start,
                         trim_end: &mut v.trim_end,
                         thumbs: &mut v.thumbs,
+                        instant_scroll,
                     },
                 );
                 if let Some(which) = action.trim_drag_started {

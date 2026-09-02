@@ -164,6 +164,8 @@ pub struct FilmstripDrawParams<'a> {
     pub trim_start: &'a mut usize,
     pub trim_end: &'a mut usize,
     pub thumbs: &'a mut ThumbCache,
+    /// Use instant (non-animated) scroll for large jumps (Home/End).
+    pub instant_scroll: bool,
 }
 
 /// Draw the filmstrip inside `ui`, returning a request for the caller to seek
@@ -178,6 +180,7 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
         trim_start,
         trim_end,
         thumbs,
+        instant_scroll,
     } = params;
 
     let mut action = FilmstripAction::default();
@@ -249,7 +252,15 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
             // manual navigation the target frame slides to the middle.
             if want_scroll {
                 let rect = geom.thumb_rect(content_rect.min, current_frame);
-                ui.scroll_to_rect(rect, Some(Align::Center));
+                if instant_scroll {
+                    ui.scroll_to_rect_animation(
+                        rect,
+                        Some(Align::Center),
+                        egui::style::ScrollAnimation::none(),
+                    );
+                } else {
+                    ui.scroll_to_rect(rect, Some(Align::Center));
+                }
                 action.scroll_into_view = true;
             }
 
