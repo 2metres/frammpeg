@@ -39,6 +39,7 @@ pub struct TransportView {
     pub strip_scale: f32,
     pub fps: f32,
     pub frame_input_edit: Option<String>,
+    pub frame_input_needs_focus: bool,
 }
 
 /// Draw the centered transport button row. Returns the first pressed action.
@@ -60,6 +61,7 @@ pub fn draw(
                     current_frame + 1,
                     total_frames,
                     view.frame_input_edit.as_ref(),
+                    view.frame_input_needs_focus,
                 )
             })
             .inner;
@@ -173,6 +175,7 @@ fn render_frame_badge(
     current: usize,
     total: usize,
     editing: Option<&String>,
+    needs_focus: bool,
 ) -> Option<TransportAction> {
     use egui::TextEdit;
 
@@ -184,7 +187,7 @@ fn render_frame_badge(
                 .font(egui::FontId::monospace(12.0)),
         );
 
-        if !response.has_focus() {
+        if needs_focus {
             response.request_focus();
         }
 

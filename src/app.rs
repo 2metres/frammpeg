@@ -115,6 +115,7 @@ struct VideoState {
     strip_stride: usize,
     strip_scale: f32,
     frame_input_edit: Option<String>,
+    frame_input_needs_focus: bool,
 }
 
 struct NoteEditSnapshot {
@@ -193,6 +194,7 @@ impl VideoState {
             strip_stride: 1,
             strip_scale: 1.0,
             frame_input_edit: None,
+            frame_input_needs_focus: false,
         }
     }
 
@@ -605,6 +607,7 @@ impl FrammpegApp {
             strip_scale,
             fps,
             frame_input_edit,
+            frame_input_needs_focus,
         ) = {
             let Phase::Ready(v) = &self.phase else {
                 return;
@@ -619,6 +622,7 @@ impl FrammpegApp {
                 v.strip_scale,
                 v.fps,
                 v.frame_input_edit.clone(),
+                v.frame_input_needs_focus,
             )
         };
 
@@ -637,6 +641,7 @@ impl FrammpegApp {
                             strip_scale,
                             fps,
                             frame_input_edit,
+                            frame_input_needs_focus,
                         },
                         current_frame,
                         total_frames,
@@ -645,6 +650,9 @@ impl FrammpegApp {
                 .inner;
             if let Some(a) = action {
                 self.apply_transport(a);
+            }
+            if let Phase::Ready(v) = &mut self.phase {
+                v.frame_input_needs_focus = false;
             }
 
             ui.add_space(2.0);
@@ -715,6 +723,9 @@ impl FrammpegApp {
                 v.trim_mode = !v.trim_mode;
             }
             TransportAction::FrameInputChanged(s) => {
+                if v.frame_input_edit.is_none() {
+                    v.frame_input_needs_focus = true;
+                }
                 v.frame_input_edit = Some(s);
             }
             TransportAction::FrameInputCommit(s) => {
