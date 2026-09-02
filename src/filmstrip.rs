@@ -793,6 +793,14 @@ mod tests {
     }
 
     #[test]
+    fn strip_scale_default_produces_stride_1() {
+        let default_scale = 1.0;
+        assert_eq!(stride_from_scale(default_scale, 100, 800.0, 100.0), 1);
+        assert_eq!(stride_from_scale(default_scale, 500, 1000.0, 100.0), 1);
+        assert_eq!(stride_from_scale(default_scale, 1000, 1920.0, 100.0), 1);
+    }
+
+    #[test]
     fn strip_position_of_frame() {
         assert_eq!(frame_to_strip_pos(120, 10), 12);
         assert_eq!(frame_to_strip_pos(0, 10), 0);
