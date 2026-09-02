@@ -301,6 +301,7 @@ impl VideoState {
         let index = self.moments.len();
         self.moments.push(moment.clone());
         self.moments_panel_open = true;
+        self.selected_moment = Some(index);
         self.history.record(Action::MomentCreated { index, moment });
     }
 
