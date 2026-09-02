@@ -20,11 +20,13 @@ const TRASH: &[u8] = include_bytes!("../assets/icons/trash.svg");
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
     SkipBack,
+    #[allow(dead_code)]
     StepBack10,
     StepBack,
     Play,
     Pause,
     StepForward,
+    #[allow(dead_code)]
     StepForward10,
     SkipForward,
     Rectangle,
