@@ -6,7 +6,6 @@ use crate::icons::{Icon, IconCache};
 use crate::theme;
 
 const STEP_SMALL: usize = 1;
-const STEP_LARGE: usize = 10;
 
 const STEP_BUTTON_W: f32 = 34.0;
 const STEP_BUTTON_H: f32 = 30.0;
@@ -15,8 +14,8 @@ const PLAY_BUTTON_H: f32 = 30.0;
 const STEP_ICON_PT: f32 = 22.0;
 const PLAY_ICON_PT: f32 = 28.0;
 const BUTTON_GAP: f32 = 4.0;
-const STEP_BUTTON_COUNT: f32 = 6.0;
-const ROW_WIDTH: f32 = STEP_BUTTON_W * STEP_BUTTON_COUNT + PLAY_BUTTON_W + BUTTON_GAP * 6.0;
+const STEP_BUTTON_COUNT: f32 = 4.0;
+const ROW_WIDTH: f32 = STEP_BUTTON_W * STEP_BUTTON_COUNT + PLAY_BUTTON_W + BUTTON_GAP * 4.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TransportAction {
@@ -33,6 +32,7 @@ pub struct TransportView {
     pub enabled: bool,
     pub playing: bool,
     pub strip_scale: f32,
+    pub fps: f32,
 }
 
 /// Draw the centered transport button row. Returns the first pressed action.
@@ -73,14 +73,17 @@ pub fn draw(
         if step_button(
             ui,
             icons,
-            Icon::StepBack10,
+            Icon::StepBack,
             view.enabled,
-            "Back 10 (Shift+Left)",
+            "Back 1 frame (Left / ,) — Shift for 1 second",
         ) {
-            action = Some(TransportAction::Back(STEP_LARGE));
-        }
-        if step_button(ui, icons, Icon::StepBack, view.enabled, "Back 1 (Left / ,)") {
-            action = Some(TransportAction::Back(STEP_SMALL));
+            let shift_held = ui.input(|i| i.modifiers.shift);
+            let step = if shift_held {
+                view.fps.round().max(1.0) as usize
+            } else {
+                STEP_SMALL
+            };
+            action = Some(TransportAction::Back(step));
         }
         if play_button(ui, icons, view) {
             action = Some(TransportAction::TogglePlay);
@@ -90,18 +93,15 @@ pub fn draw(
             icons,
             Icon::StepForward,
             view.enabled,
-            "Forward 1 (Right / .)",
+            "Forward 1 frame (Right / .) — Shift for 1 second",
         ) {
-            action = Some(TransportAction::Fwd(STEP_SMALL));
-        }
-        if step_button(
-            ui,
-            icons,
-            Icon::StepForward10,
-            view.enabled,
-            "Forward 10 (Shift+Right)",
-        ) {
-            action = Some(TransportAction::Fwd(STEP_LARGE));
+            let shift_held = ui.input(|i| i.modifiers.shift);
+            let step = if shift_held {
+                view.fps.round().max(1.0) as usize
+            } else {
+                STEP_SMALL
+            };
+            action = Some(TransportAction::Fwd(step));
         }
         if step_button(
             ui,
@@ -314,5 +314,12 @@ mod tests {
         assert!(p24 > Duration::from_millis(40) && p24 < Duration::from_millis(45));
         let p60 = frame_period(60.0);
         assert!(p60 > Duration::from_millis(15) && p60 < Duration::from_millis(18));
+    }
+
+    #[test]
+    fn fps_step_rounds_29_97_to_30() {
+        let fps = 29.97_f32;
+        let step = fps.round().max(1.0) as usize;
+        assert_eq!(step, 30);
     }
 }

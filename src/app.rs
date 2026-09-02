@@ -650,7 +650,7 @@ impl FrammpegApp {
     fn draw_bottom_panel_ready(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
 
-        let (enabled, playing, current_frame, prev_current_frame, total_frames, strip_scale) = {
+        let (enabled, playing, current_frame, prev_current_frame, total_frames, strip_scale, fps) = {
             let Phase::Ready(v) = &self.phase else {
                 return;
             };
@@ -661,6 +661,7 @@ impl FrammpegApp {
                 v.prev_current_frame,
                 v.total_frames,
                 v.strip_scale,
+                v.fps,
             )
         };
 
@@ -676,6 +677,7 @@ impl FrammpegApp {
                             enabled,
                             playing,
                             strip_scale,
+                            fps,
                         },
                         current_frame,
                         total_frames,
@@ -1452,7 +1454,11 @@ impl FrammpegApp {
                         continue;
                     }
                     let big = modifiers.shift;
-                    let step = if big { 10 } else { 1 };
+                    let step = if big {
+                        v.fps.round().max(1.0) as usize
+                    } else {
+                        1
+                    };
                     // Any step out of the trim range snaps back into range —
                     // seed the step position by clamping current into [lo, hi].
                     let start = cur.clamp(lo, hi);
