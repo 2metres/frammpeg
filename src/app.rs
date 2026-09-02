@@ -13,6 +13,7 @@ use egui::{
 use crate::extract::{spawn_extraction, ExtractEvent};
 use crate::filmstrip::{self, FilmstripDrawParams, FilmstripGeometry};
 use crate::history::{Action, History, HistoryState, HISTORY_CAP};
+use crate::icons::{Icon, IconCache};
 use crate::model::{
     Annotation, Moment, DEFAULT_FONT_SIZE, DEFAULT_STROKE_RGBA, DEFAULT_STROKE_WIDTH,
     DEFAULT_TEXT_RGBA, MAX_BUFFER,
@@ -26,6 +27,18 @@ const FRAME_CACHE_SIZE: usize = 5;
 const COPY_TOAST_MS: u64 = 1200;
 const TRANSPORT_ROW_H: f32 = 40.0;
 const BOTTOM_PANEL_H: f32 = 200.0;
+const TOOL_ICON_PT: f32 = 16.0;
+const TOOL_BUTTON_SIZE: Vec2 = Vec2::new(28.0, 24.0);
+
+fn tool_button(
+    ui: &mut egui::Ui,
+    icons: &mut IconCache,
+    icon: Icon,
+    selected: bool,
+) -> egui::Response {
+    let color = if selected { theme::ACCENT } else { theme::TEXT };
+    icons.ui(ui, icon, TOOL_ICON_PT, color, TOOL_BUTTON_SIZE)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tool {
@@ -290,6 +303,7 @@ impl VideoState {
 pub struct FrammpegApp {
     sessions_root: Option<PathBuf>,
     phase: Phase,
+    icons: IconCache,
 }
 
 impl FrammpegApp {
@@ -299,6 +313,7 @@ impl FrammpegApp {
         Self {
             sessions_root,
             phase: Phase::Empty,
+            icons: IconCache::new(),
         }
     }
 
@@ -399,23 +414,23 @@ impl FrammpegApp {
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
+        let header = self.header_label();
+        let Self { phase, icons, .. } = self;
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             ui.label(RichText::new("Frammpeg").color(theme::TEXT).strong());
             ui.separator();
 
-            if let Phase::Ready(v) = &mut self.phase {
+            if let Phase::Ready(v) = phase {
                 let mut tool = v.tool;
-                if ui
-                    .selectable_label(tool == Tool::Rect, "Rect")
+                if tool_button(ui, icons, Icon::Rectangle, tool == Tool::Rect)
                     .on_hover_text("Draw a rectangle (click and drag on the frame)")
                     .clicked()
                 {
                     tool = Tool::Rect;
                     v.commit_text_edit();
                 }
-                if ui
-                    .selectable_label(tool == Tool::Text, "Text")
+                if tool_button(ui, icons, Icon::Text, tool == Tool::Text)
                     .on_hover_text("Add a text label (click on the frame, then type)")
                     .clicked()
                 {
@@ -483,11 +498,7 @@ impl FrammpegApp {
             }
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.label(
-                    RichText::new(self.header_label())
-                        .color(theme::TEXT_MUTED)
-                        .small(),
-                );
+                ui.label(RichText::new(&header).color(theme::TEXT_MUTED).small());
             });
         });
     }
@@ -523,9 +534,10 @@ impl FrammpegApp {
 
         ui.vertical(|ui| {
             // Transport row (centered).
+            let icons = &mut self.icons;
             let action = ui
                 .allocate_ui(Vec2::new(ui.available_width(), TRANSPORT_ROW_H), |ui| {
-                    transport::draw(ui, TransportView { enabled, playing })
+                    transport::draw(ui, icons, TransportView { enabled, playing })
                 })
                 .inner;
             if let Some(a) = action {
