@@ -251,15 +251,19 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
             // the filmstrip scrolls past under a fixed center indicator; during
             // manual navigation the target frame slides to the middle.
             if want_scroll {
-                let rect = geom.thumb_rect(content_rect.min, current_frame);
+                let thumb_x_content_local = left_pad + current_frame as f32 * geom.pitch();
+                let target_rect = Rect::from_min_size(
+                    Pos2::new(thumb_x_content_local, geom.top_pad),
+                    Vec2::new(geom.thumb_w, geom.thumb_h),
+                );
                 if instant_scroll {
                     ui.scroll_to_rect_animation(
-                        rect,
+                        target_rect,
                         Some(Align::Center),
                         egui::style::ScrollAnimation::none(),
                     );
                 } else {
-                    ui.scroll_to_rect(rect, Some(Align::Center));
+                    ui.scroll_to_rect(target_rect, Some(Align::Center));
                 }
                 action.scroll_into_view = true;
             }
