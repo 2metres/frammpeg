@@ -655,6 +655,8 @@ impl FrammpegApp {
                             playing,
                             strip_scale,
                         },
+                        current_frame,
+                        total_frames,
                     )
                 })
                 .inner;
@@ -665,7 +667,7 @@ impl FrammpegApp {
             ui.add_space(2.0);
 
             // Filmstrip row.
-            let strip_top = ui.cursor().top();
+            let _strip_top = ui.cursor().top();
             if let Phase::Ready(v) = &mut self.phase {
                 v.thumbs.poll(&ctx);
                 let viewport_width = ui.available_width();
@@ -714,30 +716,6 @@ impl FrammpegApp {
                     v.seek(target);
                 }
             }
-
-            // Corner overlay: frame counter, top-right of the strip row.
-            let panel_rect = ui.max_rect();
-            let label_pos = Pos2::new(panel_rect.right() - 8.0, strip_top + 8.0);
-            let text = format!("{}/{}", current_frame + 1, total_frames.max(1));
-            let galley = ui.painter().layout_no_wrap(
-                text.clone(),
-                egui::FontId::monospace(11.0),
-                theme::TEXT_MUTED,
-            );
-            let size = galley.size() + Vec2::new(10.0, 4.0);
-            let bg_rect = Rect::from_min_size(Pos2::new(label_pos.x - size.x, label_pos.y), size);
-            ui.painter().rect_filled(
-                bg_rect,
-                CornerRadius::same(3),
-                Color32::from_rgba_unmultiplied(0x1A, 0x1E, 0x23, 210),
-            );
-            ui.painter().text(
-                bg_rect.center(),
-                Align2::CENTER_CENTER,
-                &text,
-                egui::FontId::monospace(11.0),
-                theme::TEXT_MUTED,
-            );
         });
     }
 
