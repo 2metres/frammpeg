@@ -1,7 +1,7 @@
 use egui::{
     scroll_area::{DragScroll, ScrollBarVisibility, ScrollSource},
-    Align, Align2, Color32, CornerRadius, FontId, Pos2, Rect, Response, ScrollArea, Sense, Stroke,
-    Ui, Vec2,
+    Align2, Color32, CornerRadius, FontId, Pos2, Rect, Response, ScrollArea, Sense, Stroke, Ui,
+    Vec2,
 };
 
 use crate::theme;
@@ -165,8 +165,6 @@ pub struct FilmstripDrawParams<'a> {
     pub trim_start: &'a mut usize,
     pub trim_end: &'a mut usize,
     pub thumbs: &'a mut ThumbCache,
-    /// Use instant (non-animated) scroll for large jumps (Home/End).
-    pub instant_scroll: bool,
     /// Accumulator for scroll-to-scrub, converted to frame steps.
     pub scroll_accumulator: &'a mut f32,
 }
@@ -183,7 +181,6 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
         trim_start,
         trim_end,
         thumbs,
-        instant_scroll,
         scroll_accumulator,
     } = params;
 
@@ -207,9 +204,20 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
     let row_h = geom.row_height();
     let want_scroll = current_frame != prev_current_frame;
 
+    // scroll_to_rect writes state.offset in ScrollArea::end, AFTER add_contents
+    // has painted. That leaves the current-frame highlight one pitch to the
+    // right of viewport center every time current_frame advances (a persistent
+    // visible offset during playback, one flicker on each manual step). Pre-set
+    // the horizontal offset so the paint inside show_viewport uses the new
+    // state.offset. Target math is a pure function of current_frame — with
+    // left_pad = viewport.width() / 2, the offset that centers thumb i is
+    // i * pitch + thumb_w / 2.
+    let target_offset = current_frame as f32 * geom.pitch() + geom.thumb_w * 0.5;
+
     ScrollArea::horizontal()
         .id_salt("frammpeg-filmstrip")
         .auto_shrink([false, false])
+        .horizontal_scroll_offset(target_offset)
         .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
         .scroll_source(ScrollSource {
             scroll_bar: false,
@@ -257,20 +265,7 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
                 paint_trim_rails(&painter, content_rect.min, geom, (*trim_start, *trim_end));
             }
 
-            // Keep the current frame centered whenever it changes — during play
-            // the filmstrip scrolls past under a fixed center indicator; during
-            // manual navigation the target frame slides to the middle.
             if want_scroll {
-                let rect = geom.thumb_rect(content_rect.min, current_frame);
-                if instant_scroll {
-                    ui.scroll_to_rect_animation(
-                        rect,
-                        Some(Align::Center),
-                        egui::style::ScrollAnimation::none(),
-                    );
-                } else {
-                    ui.scroll_to_rect(rect, Some(Align::Center));
-                }
                 action.scroll_into_view = true;
             }
 
