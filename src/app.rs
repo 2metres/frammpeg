@@ -505,8 +505,6 @@ impl FrammpegApp {
         let Self { phase, icons, .. } = self;
         ui.horizontal(|ui| {
             ui.add_space(4.0);
-            ui.label(RichText::new("Frammpeg").color(theme::TEXT).strong());
-            ui.separator();
 
             if let Phase::Ready(v) = phase {
                 let mut tool = v.tool;
