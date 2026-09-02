@@ -39,6 +39,20 @@ cargo test                    # unit tests
 cargo clippy -- -D warnings   # lint
 ```
 
+### Shared Cargo Target Directory
+
+To speed up parallel builds across multiple git worktrees, this project uses a shared `CARGO_TARGET_DIR` so common dependencies compile once rather than per-worktree.
+
+**Configuration:** `.cargo/config.toml` sets `target-dir = "~/.frammpeg/target-shared"`. All worktrees share this build cache.
+
+**Trade-off:** Cargo serializes concurrent writes to the same artifact via per-target locks. Worktrees on the same toolchain and dependency set mostly cache-hit; different dependency sets compile independently to different fingerprints. Stale-cache issues are rare but possible if multiple worktrees rebuild the same crate simultaneously.
+
+**Alternative:** Set `CARGO_TARGET_DIR=~/.frammpeg/target-shared` in your shell environment instead of using the config file.
+
+### Concurrent Worktree Limit
+
+When dispatching parallel subagents in git worktrees, cap concurrent worktrees at **N=3** by default to avoid machine starvation. Each cargo build fans out to `num_cpus` rustc processes, so 10+ concurrent worktrees can peg CPU and disk, degrading all builds. See `~/.agents/WORKFLOW.md` for orchestrator guidance.
+
 ## Architecture Overview
 
 Single-binary Rust desktop app, three layers:
