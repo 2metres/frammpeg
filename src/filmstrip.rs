@@ -532,7 +532,7 @@ fn handle_seek_interaction(
     let last = total_frames - 1;
     if response.clicked() || response.dragged() {
         if let Some(pos) = response.interact_pointer_pos() {
-            let x = (pos.x - content_rect.min.x) / pitch;
+            let x = (pos.x - content_rect.min.x - geom.left_pad) / pitch;
             let idx = (x.floor() as isize).max(0) as usize;
             let clamped = idx.min(last);
             let target = if trim_enabled {
