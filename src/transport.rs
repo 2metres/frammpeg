@@ -69,7 +69,9 @@ fn step_button(ui: &mut Ui, glyph: &str, enabled: bool, tooltip: &str) -> bool {
         theme::TEXT_MUTED
     };
     let text = RichText::new(glyph).size(22.0).color(color).strong();
-    let btn = Button::new(text).min_size(Vec2::new(34.0, 30.0));
+    let btn = Button::new(text)
+        .min_size(Vec2::new(34.0, 30.0))
+        .frame(false);
     ui.add_enabled(enabled, btn)
         .on_hover_text(tooltip)
         .clicked()
@@ -83,7 +85,9 @@ fn play_button(ui: &mut Ui, view: TransportView) -> bool {
         theme::TEXT_MUTED
     };
     let text = RichText::new(glyph).size(28.0).color(color).strong();
-    let btn = Button::new(text).min_size(Vec2::new(48.0, 30.0));
+    let btn = Button::new(text)
+        .min_size(Vec2::new(48.0, 30.0))
+        .frame(false);
     let tooltip = if view.playing {
         "Pause (Space)"
     } else {
