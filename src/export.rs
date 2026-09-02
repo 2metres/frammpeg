@@ -4,10 +4,54 @@ use std::path::{Path, PathBuf};
 
 use ab_glyph::FontRef;
 use chrono::Local;
+use serde::Serialize;
 
 use crate::annotate;
 use crate::model::{buffer_range_within, Annotation, Moment};
 use crate::session;
+
+#[derive(Debug, Serialize)]
+pub struct ExportManifest {
+    pub export: ExportMeta,
+    pub moments: Vec<MomentEntry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExportMeta {
+    pub timestamp: String,
+    pub source_range: [usize; 2],
+    pub total_frames: usize,
+    pub video: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MomentEntry {
+    pub frame: usize,
+    pub buffer: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub annotations: Vec<AnnotationEntry>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum AnnotationEntry {
+    Rect {
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        stroke: String,
+        stroke_width: f32,
+    },
+    Text {
+        x: f32,
+        y: f32,
+        text: String,
+        font_size: f32,
+        color: String,
+    },
+}
 
 /// One planned output file for a moment's export folder.
 #[derive(Debug, Clone, PartialEq)]
@@ -134,6 +178,58 @@ fn burn_and_save(
     annotate::burn(&mut rgba, annotations, font);
     rgba.save(target)
         .map_err(|e| io::Error::other(format!("save {}: {e}", target.display())))?;
+    Ok(())
+}
+
+fn rgba_to_hex(rgba: [u8; 4]) -> String {
+    if rgba[3] == 255 {
+        format!("#{:02X}{:02X}{:02X}", rgba[0], rgba[1], rgba[2])
+    } else {
+        format!(
+            "#{:02X}{:02X}{:02X}{:02X}",
+            rgba[0], rgba[1], rgba[2], rgba[3]
+        )
+    }
+}
+
+fn annotation_to_entry(ann: &Annotation) -> AnnotationEntry {
+    match ann {
+        Annotation::Rect {
+            x,
+            y,
+            w,
+            h,
+            stroke_color,
+            stroke_width,
+        } => AnnotationEntry::Rect {
+            x: *x,
+            y: *y,
+            w: *w,
+            h: *h,
+            stroke: rgba_to_hex(*stroke_color),
+            stroke_width: *stroke_width,
+        },
+        Annotation::Text {
+            x,
+            y,
+            text,
+            font_size,
+            color,
+        } => AnnotationEntry::Text {
+            x: *x,
+            y: *y,
+            text: text.clone(),
+            font_size: *font_size,
+            color: rgba_to_hex(*color),
+        },
+    }
+}
+
+pub fn write_moments_yaml(export_root: &Path, manifest: &ExportManifest) -> io::Result<()> {
+    let yaml_path = export_root.join("moments.yaml");
+    let yaml_str = serde_saphyr::to_string(manifest)
+        .map_err(|e| io::Error::other(format!("serialize manifest: {e}")))?;
+    std::fs::write(&yaml_path, yaml_str)?;
     Ok(())
 }
 
