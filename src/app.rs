@@ -409,11 +409,29 @@ impl VideoState {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn set_macos_dark_appearance() {
+    use objc2_app_kit::{NSAppearance, NSAppearanceCustomization, NSApplication};
+    use objc2_foundation::{MainThreadMarker, NSString};
+
+    if let Some(mtm) = MainThreadMarker::new() {
+        let app = NSApplication::sharedApplication(mtm);
+        if let Some(main_window) = app.mainWindow() {
+            let appearance_name = NSString::from_str("NSAppearanceNameDarkAqua");
+            if let Some(appearance) = NSAppearance::appearanceNamed(&appearance_name) {
+                main_window.setAppearance(Some(&appearance));
+            }
+        }
+    }
+}
+
 pub struct FrammpegApp {
     sessions_root: Option<PathBuf>,
     phase: Phase,
     icons: IconCache,
     last_title: String,
+    #[cfg(target_os = "macos")]
+    appearance_set: bool,
 }
 
 impl FrammpegApp {
@@ -427,6 +445,8 @@ impl FrammpegApp {
             phase: Phase::Empty,
             icons: IconCache::new(),
             last_title: String::new(),
+            #[cfg(target_os = "macos")]
+            appearance_set: false,
         }
     }
 
@@ -1497,6 +1517,13 @@ fn truncate(s: &str, n: usize) -> String {
 impl eframe::App for FrammpegApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+
+        #[cfg(target_os = "macos")]
+        if !self.appearance_set {
+            set_macos_dark_appearance();
+            self.appearance_set = true;
+        }
+
         self.poll_extraction(&ctx);
 
         let new_title = match &self.phase {
