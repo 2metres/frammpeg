@@ -14,6 +14,8 @@ const SQUARE: &[u8] = include_bytes!("../assets/icons/square.svg");
 const TYPE: &[u8] = include_bytes!("../assets/icons/type.svg");
 const SCISSORS: &[u8] = include_bytes!("../assets/icons/scissors.svg");
 const BOOKMARK: &[u8] = include_bytes!("../assets/icons/bookmark.svg");
+const X: &[u8] = include_bytes!("../assets/icons/x.svg");
+const TRASH: &[u8] = include_bytes!("../assets/icons/trash.svg");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
@@ -29,6 +31,8 @@ pub enum Icon {
     Text,
     Scissors,
     Bookmark,
+    X,
+    Trash,
 }
 
 impl Icon {
@@ -46,6 +50,8 @@ impl Icon {
             Icon::Text => TYPE,
             Icon::Scissors => SCISSORS,
             Icon::Bookmark => BOOKMARK,
+            Icon::X => X,
+            Icon::Trash => TRASH,
         }
     }
 
@@ -63,6 +69,8 @@ impl Icon {
             Icon::Text => "type",
             Icon::Scissors => "scissors",
             Icon::Bookmark => "bookmark",
+            Icon::X => "x",
+            Icon::Trash => "trash",
         }
     }
 }
@@ -245,6 +253,8 @@ mod tests {
             Icon::Text,
             Icon::Scissors,
             Icon::Bookmark,
+            Icon::X,
+            Icon::Trash,
         ];
         let opt = usvg::Options::default();
         for icon in icons {
