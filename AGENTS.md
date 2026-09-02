@@ -73,6 +73,21 @@ Configuration lives in `_typos.toml` at repo root. The allowlist is there for le
 
 **Integration:** Consider wiring typos into lefthook pre-commit as a soft check (warn-not-fail) — useful for catching obvious typos early without blocking commits when it over-flags.
 
+## Dependency Auditing
+
+Periodically check for unused dependencies with `cargo machete`:
+
+```bash
+cargo install cargo-machete   # one-time install
+cargo machete                 # find unused deps
+```
+
+Or use the wrapper script:
+
+```bash
+scripts/check-unused.sh
+```
+
 ## Architecture Overview
 
 Single-binary Rust desktop app, three layers:
