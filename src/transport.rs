@@ -1,14 +1,19 @@
 use std::time::Duration;
 
-use egui::{Button, RichText, Ui, Vec2};
+use egui::{Ui, Vec2};
 
+use crate::icons::{Icon, IconCache};
 use crate::theme;
 
 const STEP_SMALL: usize = 1;
 const STEP_LARGE: usize = 10;
 
 const STEP_BUTTON_W: f32 = 34.0;
+const STEP_BUTTON_H: f32 = 30.0;
 const PLAY_BUTTON_W: f32 = 48.0;
+const PLAY_BUTTON_H: f32 = 30.0;
+const STEP_ICON_PT: f32 = 20.0;
+const PLAY_ICON_PT: f32 = 24.0;
 const BUTTON_GAP: f32 = 4.0;
 const STEP_BUTTON_COUNT: f32 = 6.0;
 const ROW_WIDTH: f32 = STEP_BUTTON_W * STEP_BUTTON_COUNT + PLAY_BUTTON_W + BUTTON_GAP * 6.0;
@@ -29,32 +34,62 @@ pub struct TransportView {
 }
 
 /// Draw the centered transport button row. Returns the first pressed action.
-pub fn draw(ui: &mut Ui, view: TransportView) -> Option<TransportAction> {
+pub fn draw(ui: &mut Ui, icons: &mut IconCache, view: TransportView) -> Option<TransportAction> {
     let mut action: Option<TransportAction> = None;
 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = BUTTON_GAP;
         let pad = ((ui.available_width() - ROW_WIDTH) * 0.5).max(0.0);
         ui.add_space(pad);
-        if step_button(ui, "\u{23EE}", view.enabled, "First frame (Home)") {
+        if step_button(
+            ui,
+            icons,
+            Icon::SkipBack,
+            view.enabled,
+            "First frame (Home)",
+        ) {
             action = Some(TransportAction::Home);
         }
-        if step_button(ui, "\u{23EA}", view.enabled, "Back 10 (Shift+Left)") {
+        if step_button(
+            ui,
+            icons,
+            Icon::StepBack10,
+            view.enabled,
+            "Back 10 (Shift+Left)",
+        ) {
             action = Some(TransportAction::Back(STEP_LARGE));
         }
-        if step_button(ui, "\u{25C0}", view.enabled, "Back 1 (Left / ,)") {
+        if step_button(ui, icons, Icon::StepBack, view.enabled, "Back 1 (Left / ,)") {
             action = Some(TransportAction::Back(STEP_SMALL));
         }
-        if play_button(ui, view) {
+        if play_button(ui, icons, view) {
             action = Some(TransportAction::TogglePlay);
         }
-        if step_button(ui, "\u{25B6}", view.enabled, "Forward 1 (Right / .)") {
+        if step_button(
+            ui,
+            icons,
+            Icon::StepForward,
+            view.enabled,
+            "Forward 1 (Right / .)",
+        ) {
             action = Some(TransportAction::Fwd(STEP_SMALL));
         }
-        if step_button(ui, "\u{23E9}", view.enabled, "Forward 10 (Shift+Right)") {
+        if step_button(
+            ui,
+            icons,
+            Icon::StepForward10,
+            view.enabled,
+            "Forward 10 (Shift+Right)",
+        ) {
             action = Some(TransportAction::Fwd(STEP_LARGE));
         }
-        if step_button(ui, "\u{23ED}", view.enabled, "Last frame (End)") {
+        if step_button(
+            ui,
+            icons,
+            Icon::SkipForward,
+            view.enabled,
+            "Last frame (End)",
+        ) {
             action = Some(TransportAction::End);
         }
     });
@@ -62,36 +97,62 @@ pub fn draw(ui: &mut Ui, view: TransportView) -> Option<TransportAction> {
     action
 }
 
-fn step_button(ui: &mut Ui, glyph: &str, enabled: bool, tooltip: &str) -> bool {
+fn step_button(
+    ui: &mut Ui,
+    icons: &mut IconCache,
+    icon: Icon,
+    enabled: bool,
+    tooltip: &str,
+) -> bool {
     let color = if enabled {
         theme::TEXT
     } else {
         theme::TEXT_MUTED
     };
-    let text = RichText::new(glyph).size(20.0).color(color);
-    let btn = Button::new(text).min_size(Vec2::new(34.0, 30.0));
-    ui.add_enabled(enabled, btn)
-        .on_hover_text(tooltip)
-        .clicked()
+    ui.add_enabled_ui(enabled, |ui| {
+        icons
+            .ui(
+                ui,
+                icon,
+                STEP_ICON_PT,
+                color,
+                Vec2::new(STEP_BUTTON_W, STEP_BUTTON_H),
+            )
+            .on_hover_text(tooltip)
+            .clicked()
+    })
+    .inner
 }
 
-fn play_button(ui: &mut Ui, view: TransportView) -> bool {
-    let glyph = if view.playing { "\u{23F8}" } else { "\u{25B6}" };
+fn play_button(ui: &mut Ui, icons: &mut IconCache, view: TransportView) -> bool {
+    let icon = if view.playing {
+        Icon::Pause
+    } else {
+        Icon::Play
+    };
     let color = if view.enabled {
         theme::ACCENT
     } else {
         theme::TEXT_MUTED
     };
-    let text = RichText::new(glyph).size(24.0).color(color).strong();
-    let btn = Button::new(text).min_size(Vec2::new(48.0, 30.0));
     let tooltip = if view.playing {
         "Pause (Space)"
     } else {
         "Play (Space)"
     };
-    ui.add_enabled(view.enabled, btn)
-        .on_hover_text(tooltip)
-        .clicked()
+    ui.add_enabled_ui(view.enabled, |ui| {
+        icons
+            .ui(
+                ui,
+                icon,
+                PLAY_ICON_PT,
+                color,
+                Vec2::new(PLAY_BUTTON_W, PLAY_BUTTON_H),
+            )
+            .on_hover_text(tooltip)
+            .clicked()
+    })
+    .inner
 }
 
 /// Given a playback fps and the elapsed time since the last tick, return how
