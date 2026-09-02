@@ -37,7 +37,18 @@ fn tool_button(
     selected: bool,
 ) -> egui::Response {
     let color = if selected { theme::ACCENT } else { theme::TEXT };
-    icons.ui(ui, icon, TOOL_ICON_PT, color, TOOL_BUTTON_SIZE, false)
+    let bg = if selected {
+        theme::WIDGET_ACTIVE
+    } else {
+        Color32::TRANSPARENT
+    };
+    egui::Frame::new()
+        .fill(bg)
+        .corner_radius(CornerRadius::same(4))
+        .show(ui, |ui| {
+            icons.ui(ui, icon, TOOL_ICON_PT, color, TOOL_BUTTON_SIZE, false)
+        })
+        .inner
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -503,42 +514,17 @@ impl FrammpegApp {
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
-        let Self { phase, icons, .. } = self;
+        let Self { phase, .. } = self;
         ui.horizontal(|ui| {
             ui.add_space(4.0);
 
             if let Phase::Ready(v) = phase {
-                let moments_count = v.moments.len();
-                let moments_label = if moments_count > 0 && !v.moments_panel_open {
-                    format!("{}", moments_count)
-                } else {
-                    String::new()
-                };
-                let moments_tooltip = if v.moments_panel_open {
-                    "Hide moments panel"
-                } else {
-                    "Show moments panel"
-                };
-                if tool_button(ui, icons, Icon::Bookmark, v.moments_panel_open)
-                    .on_hover_text(moments_tooltip)
-                    .clicked()
-                {
-                    v.moments_panel_open = !v.moments_panel_open;
-                }
-                if !moments_label.is_empty() {
-                    ui.label(
-                        RichText::new(moments_label)
-                            .small()
-                            .color(theme::TEXT_MUTED),
-                    );
-                }
-
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add(
                             egui::Button::new("Copy export path")
                                 .frame(true)
-                                .min_size(egui::Vec2::new(0.0, 30.0)),
+                                .min_size(egui::Vec2::new(0.0, 24.0)),
                         )
                         .on_hover_text("Copy the export folder path to the clipboard")
                         .clicked()
@@ -557,7 +543,7 @@ impl FrammpegApp {
                         .add(
                             egui::Button::new("Export")
                                 .frame(true)
-                                .min_size(egui::Vec2::new(0.0, 30.0)),
+                                .min_size(egui::Vec2::new(0.0, 24.0)),
                         )
                         .on_hover_text("Write each moment's buffer + annotated frame to disk")
                         .clicked()
@@ -1099,7 +1085,7 @@ impl FrammpegApp {
             .order(Order::Foreground)
             .fixed_pos(rect.min + Vec2::new(12.0, 12.0))
             .show(ui.ctx(), |ui| {
-                ui.vertical(|ui| {
+                ui.vertical_centered(|ui| {
                     if tool_button(ui, icons, Icon::Rectangle, v.tool == Tool::Rect)
                         .on_hover_text("Rectangle (click and drag on the frame)")
                         .clicked()
@@ -1129,6 +1115,50 @@ impl FrammpegApp {
                 Stroke::new(1.0, Color32::from_rgba_unmultiplied(58, 66, 76, 180)),
                 egui::StrokeKind::Outside,
             );
+
+        // Floating moments toggle on the right edge
+        Area::new(egui::Id::new("frammpeg-moments-toggle"))
+            .order(Order::Foreground)
+            .fixed_pos(Pos2::new(rect.right() - 40.0 - 12.0, rect.top() + 12.0))
+            .show(ui.ctx(), |ui| {
+                Frame::new()
+                    .fill(Color32::from_rgba_unmultiplied(20, 23, 27, 220))
+                    .stroke(Stroke::new(
+                        1.0,
+                        Color32::from_rgba_unmultiplied(58, 66, 76, 180),
+                    ))
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(6)
+                    .show(ui, |ui| {
+                        let color = if v.moments_panel_open {
+                            theme::ACCENT
+                        } else {
+                            theme::TEXT
+                        };
+                        let moments_count = v.moments.len();
+                        let tooltip = if v.moments_panel_open {
+                            "Close moments".to_string()
+                        } else if moments_count > 0 {
+                            format!("Moments ({})", moments_count)
+                        } else {
+                            "Moments".to_string()
+                        };
+                        if icons
+                            .ui(
+                                ui,
+                                Icon::Bookmark,
+                                TOOL_ICON_PT,
+                                color,
+                                TOOL_BUTTON_SIZE,
+                                false,
+                            )
+                            .on_hover_text(tooltip)
+                            .clicked()
+                        {
+                            v.moments_panel_open = !v.moments_panel_open;
+                        }
+                    });
+            });
 
         let ui_to_frame = |p: Pos2| -> (f32, f32) {
             (
