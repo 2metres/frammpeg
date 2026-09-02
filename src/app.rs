@@ -786,9 +786,17 @@ impl FrammpegApp {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Moments").color(theme::TEXT).strong());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui
-                    .button(RichText::new("✕").color(theme::TEXT_MUTED))
-                    .on_hover_text("Close panel")
+                if self
+                    .icons
+                    .ui(
+                        ui,
+                        Icon::X,
+                        14.0,
+                        theme::TEXT_MUTED,
+                        Vec2::new(20.0, 20.0),
+                        false,
+                    )
+                    .on_hover_text("Close moments panel")
                     .clicked()
                 {
                     if let Phase::Ready(v) = &mut self.phase {
@@ -918,7 +926,19 @@ impl FrammpegApp {
                         }
                     }
                     ui.add_space(4.0);
-                    if ui.button("Delete moment").clicked() {
+                    if self
+                        .icons
+                        .ui(
+                            ui,
+                            Icon::Trash,
+                            14.0,
+                            theme::TEXT_MUTED,
+                            Vec2::new(24.0, 20.0),
+                            false,
+                        )
+                        .on_hover_text("Delete this moment")
+                        .clicked()
+                    {
                         delete = Some(i);
                     }
                 }
