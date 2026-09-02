@@ -42,14 +42,15 @@ pub struct TransportView {
     pub frame_input_needs_focus: bool,
 }
 
-/// Draw the centered transport button row. Returns the first pressed action.
+/// Draw the centered transport button row. Returns the first pressed action
+/// and the updated needs_focus flag.
 pub fn draw(
     ui: &mut Ui,
     icons: &mut IconCache,
-    view: TransportView,
+    mut view: TransportView,
     current_frame: usize,
     total_frames: usize,
-) -> Option<TransportAction> {
+) -> (Option<TransportAction>, bool) {
     let mut action: Option<TransportAction> = None;
     let mut new_scale = view.strip_scale;
 
@@ -61,7 +62,7 @@ pub fn draw(
                     current_frame + 1,
                     total_frames,
                     view.frame_input_edit.as_ref(),
-                    view.frame_input_needs_focus,
+                    &mut view.frame_input_needs_focus,
                 )
             })
             .inner;
@@ -167,7 +168,7 @@ pub fn draw(
         });
     });
 
-    action
+    (action, view.frame_input_needs_focus)
 }
 
 fn render_frame_badge(
@@ -175,59 +176,71 @@ fn render_frame_badge(
     current: usize,
     total: usize,
     editing: Option<&String>,
-    needs_focus: bool,
+    needs_focus: &mut bool,
 ) -> Option<TransportAction> {
     use egui::TextEdit;
 
-    if let Some(buffer) = editing {
-        let mut text = buffer.clone();
-        let response = ui.add(
-            TextEdit::singleline(&mut text)
-                .desired_width(60.0)
-                .font(egui::FontId::monospace(12.0)),
-        );
+    let display_text = format!("{} / {}", current, total.max(1));
+    let galley = ui.painter().layout_no_wrap(
+        display_text.clone(),
+        egui::FontId::monospace(12.0),
+        theme::TEXT_MUTED,
+    );
+    let chip_size = galley.size() + Vec2::new(12.0, 6.0);
 
-        if needs_focus {
-            response.request_focus();
-        }
+    ui.allocate_ui_with_layout(
+        chip_size,
+        egui::Layout::top_down(egui::Align::Center),
+        |ui| {
+            if let Some(buffer) = editing {
+                let mut text = buffer.clone();
+                let response = ui.add(
+                    TextEdit::singleline(&mut text)
+                        .desired_width(chip_size.x)
+                        .min_size(chip_size)
+                        .font(egui::FontId::monospace(12.0)),
+                );
 
-        if response.lost_focus() {
-            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                return Some(TransportAction::FrameInputCancel);
+                if *needs_focus {
+                    response.request_focus();
+                    if response.has_focus() {
+                        *needs_focus = false;
+                    }
+                }
+
+                if response.lost_focus() {
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        return Some(TransportAction::FrameInputCancel);
+                    }
+                    return Some(TransportAction::FrameInputCommit(text));
+                }
+                if text != *buffer {
+                    return Some(TransportAction::FrameInputChanged(text));
+                }
+                None
+            } else {
+                let (rect, response) = ui.allocate_exact_size(chip_size, Sense::click());
+                let bg = if response.hovered() {
+                    theme::WIDGET_HOVERED
+                } else {
+                    theme::WIDGET_IDLE
+                };
+                ui.painter().rect_filled(rect, CornerRadius::same(4), bg);
+                ui.painter().text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    &display_text,
+                    egui::FontId::monospace(12.0),
+                    theme::TEXT_MUTED,
+                );
+                if response.clicked() {
+                    return Some(TransportAction::FrameInputChanged(current.to_string()));
+                }
+                None
             }
-            return Some(TransportAction::FrameInputCommit(text));
-        }
-        if text != *buffer {
-            return Some(TransportAction::FrameInputChanged(text));
-        }
-        None
-    } else {
-        let text = format!("{} / {}", current, total.max(1));
-        let galley = ui.painter().layout_no_wrap(
-            text.clone(),
-            egui::FontId::monospace(12.0),
-            theme::TEXT_MUTED,
-        );
-        let size = galley.size() + Vec2::new(12.0, 6.0);
-        let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-        let bg = if response.hovered() {
-            theme::WIDGET_HOVERED
-        } else {
-            theme::WIDGET_IDLE
-        };
-        ui.painter().rect_filled(rect, CornerRadius::same(4), bg);
-        ui.painter().text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            &text,
-            egui::FontId::monospace(12.0),
-            theme::TEXT_MUTED,
-        );
-        if response.clicked() {
-            return Some(TransportAction::FrameInputChanged(current.to_string()));
-        }
-        None
-    }
+        },
+    )
+    .inner
 }
 
 fn step_button(
