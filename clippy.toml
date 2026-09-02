@@ -1,0 +1,14 @@
+# Clippy configuration for Frammpeg
+# See: https://doc.rust-lang.org/clippy/configuration.html
+
+# Minimum Rust version for this project
+msrv = "1.85"
+
+# Some UI and state-machine functions have naturally high complexity
+cognitive-complexity-threshold = 30
+
+# Avoid breaking changes to exported API
+avoid-breaking-exported-api = true
+
+# UI panel rendering functions can be naturally long
+too-many-lines-threshold = 400
