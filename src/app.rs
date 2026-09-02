@@ -11,7 +11,7 @@ use egui::{
 };
 
 use crate::extract::{spawn_extraction, ExtractEvent};
-use crate::filmstrip::{self, FilmstripDrawParams, FilmstripGeometry};
+use crate::filmstrip::{self, FilmstripDrawParams, FilmstripGeometry, TrimHandle};
 use crate::history::{Action, History, HistoryState, HISTORY_CAP};
 use crate::model::{
     Annotation, Moment, DEFAULT_FONT_SIZE, DEFAULT_STROKE_RGBA, DEFAULT_STROKE_WIDTH,
@@ -80,6 +80,9 @@ struct VideoState {
     history: History,
     note_edit: Option<NoteEditSnapshot>,
     buffer_edit: Option<BufferEditSnapshot>,
+    trim_start: usize,
+    trim_end: usize,
+    trim_edit: Option<TrimEditSnapshot>,
 }
 
 struct NoteEditSnapshot {
@@ -90,6 +93,12 @@ struct NoteEditSnapshot {
 struct BufferEditSnapshot {
     moment_index: usize,
     original: usize,
+}
+
+struct TrimEditSnapshot {
+    #[allow(dead_code)]
+    which: TrimHandle,
+    original: (usize, usize),
 }
 
 impl VideoState {
@@ -107,6 +116,7 @@ impl VideoState {
             thumbs::DEFAULT_THUMB_H,
             ctx.clone(),
         );
+        let trim_end = total_frames.saturating_sub(1);
         Self {
             session,
             video_path,
@@ -134,7 +144,18 @@ impl VideoState {
             history: History::new(HISTORY_CAP),
             note_edit: None,
             buffer_edit: None,
+            trim_start: 0,
+            trim_end,
+            trim_edit: None,
         }
+    }
+
+    fn trim_enabled(&self) -> bool {
+        self.total_frames >= 2 && self.trim_end > self.trim_start
+    }
+
+    fn in_trim(&self, frame: usize) -> bool {
+        !self.trim_enabled() || (frame >= self.trim_start && frame <= self.trim_end)
     }
 
     fn seek(&mut self, target: usize) {
@@ -150,11 +171,18 @@ impl VideoState {
         if self.playing == playing {
             return;
         }
-        self.playing = playing;
         if playing {
+            // Refuse to start playback from outside the trim range — the user
+            // may have scrubbed there deliberately to peek; requiring a seek
+            // back into range is safer than snapping.
+            if self.trim_enabled() && !self.in_trim(self.current_frame) {
+                return;
+            }
+            self.playing = true;
             self.last_play_tick = Some(Instant::now());
             self.play_leftover = Duration::ZERO;
         } else {
+            self.playing = false;
             self.last_play_tick = None;
             self.play_leftover = Duration::ZERO;
         }
@@ -172,8 +200,12 @@ impl VideoState {
         let elapsed = now.duration_since(prev) + self.play_leftover;
         let (frames, leftover) = transport::advance_frames(self.fps, elapsed);
         if frames > 0 {
-            let (next, hit_end) =
-                transport::step_play(self.current_frame, frames, self.total_frames);
+            let range_end = if self.trim_enabled() {
+                self.trim_end
+            } else {
+                self.total_frames - 1
+            };
+            let (next, hit_end) = transport::step_play_to(self.current_frame, frames, range_end);
             if next != self.current_frame {
                 self.commit_text_edit();
                 self.current_frame = next;
@@ -218,6 +250,9 @@ impl VideoState {
         self.editing_text = None;
         self.text_buffer.clear();
         self.text_focus_pending = false;
+        // Undo/redo may have swapped trim values out from under a pending drag
+        // snapshot; drop it so the next drag records a fresh baseline.
+        self.trim_edit = None;
         if let Some(sel) = self.selected_moment {
             if sel >= self.moments.len() {
                 self.selected_moment = None;
@@ -257,6 +292,29 @@ impl VideoState {
                     });
                 }
             }
+        }
+        if let Some(snap) = self.trim_edit.take() {
+            let new = (self.trim_start, self.trim_end);
+            if new != snap.original {
+                self.history.record(Action::TrimChanged {
+                    old: snap.original,
+                    new,
+                });
+            }
+        }
+    }
+
+    fn reset_trim(&mut self) {
+        if self.total_frames == 0 {
+            return;
+        }
+        self.finalize_pending_edits();
+        let old = (self.trim_start, self.trim_end);
+        let new = (0usize, self.total_frames - 1);
+        if old != new {
+            self.trim_start = new.0;
+            self.trim_end = new.1;
+            self.history.record(Action::TrimChanged { old, new });
         }
     }
 
@@ -424,11 +482,14 @@ impl FrammpegApp {
                 v.tool = tool;
 
                 ui.separator();
-                if ui
-                    .button("Mark notable")
-                    .on_hover_text("Add the current frame to Moments")
-                    .clicked()
-                {
+                let can_mark = v.in_trim(v.current_frame);
+                let mark_tooltip = if can_mark {
+                    "Add the current frame to Moments"
+                } else {
+                    "Current frame is outside the trim range — move the yellow handles first"
+                };
+                let mark_response = ui.add_enabled(can_mark, egui::Button::new("Mark notable"));
+                if mark_response.on_hover_text(mark_tooltip).clicked() && can_mark {
                     v.finalize_pending_edits();
                     let frame = v.current_frame;
                     if !v.moments.iter().any(|m| m.frame_index == frame) {
@@ -441,16 +502,30 @@ impl FrammpegApp {
                 }
 
                 ui.separator();
+                let reset_enabled =
+                    v.total_frames > 0 && (v.trim_start != 0 || v.trim_end + 1 != v.total_frames);
+                let reset_response = ui.add_enabled(reset_enabled, egui::Button::new("Reset trim"));
+                if reset_response
+                    .on_hover_text("Reset the yellow trim handles to the full clip")
+                    .clicked()
+                {
+                    v.reset_trim();
+                }
+
+                ui.separator();
                 if ui
                     .button("Export")
                     .on_hover_text("Write each moment's buffer + annotated frame to disk")
                     .clicked()
                 {
                     v.commit_text_edit();
+                    v.finalize_pending_edits();
                     match export::export_all(
                         &v.moments,
                         &v.annotations,
                         v.total_frames,
+                        v.trim_start,
+                        v.trim_end,
                         &v.session.frames,
                         &v.session.export,
                     ) {
@@ -545,9 +620,28 @@ impl FrammpegApp {
                         total_frames: v.total_frames,
                         current_frame: v.current_frame,
                         prev_current_frame,
+                        trim_start: &mut v.trim_start,
+                        trim_end: &mut v.trim_end,
                         thumbs: &mut v.thumbs,
                     },
                 );
+                if let Some(which) = action.trim_drag_started {
+                    v.trim_edit = Some(TrimEditSnapshot {
+                        which,
+                        original: (v.trim_start, v.trim_end),
+                    });
+                }
+                if action.trim_drag_stopped {
+                    if let Some(snap) = v.trim_edit.take() {
+                        let new = (v.trim_start, v.trim_end);
+                        if new != snap.original {
+                            v.history.record(Action::TrimChanged {
+                                old: snap.original,
+                                new,
+                            });
+                        }
+                    }
+                }
                 if let Some(target) = action.seek_to {
                     v.set_playing(false);
                     v.seek(target);
@@ -587,23 +681,25 @@ impl FrammpegApp {
         if v.total_frames == 0 {
             return;
         }
-        let last = v.total_frames - 1;
+        let (lo, hi) = trim_range(v);
         match action {
             TransportAction::Home => {
                 v.set_playing(false);
-                v.seek(0);
+                v.seek(lo);
             }
             TransportAction::End => {
                 v.set_playing(false);
-                v.seek(last);
+                v.seek(hi);
             }
             TransportAction::Back(n) => {
                 v.set_playing(false);
-                v.seek(v.current_frame.saturating_sub(n));
+                let start = v.current_frame.clamp(lo, hi);
+                v.seek(start.saturating_sub(n).max(lo));
             }
             TransportAction::Fwd(n) => {
                 v.set_playing(false);
-                v.seek((v.current_frame + n).min(last));
+                let start = v.current_frame.clamp(lo, hi);
+                v.seek((start + n).min(hi));
             }
             TransportAction::TogglePlay => {
                 v.set_playing(!v.playing);
@@ -643,11 +739,23 @@ impl FrammpegApp {
                     let short = truncate(&preview, 32);
                     (m.frame_index, short, m.buffer)
                 };
+                let in_range = v.in_trim(frame_index);
                 let header = format!("Frame {}", frame_index + 1);
-                let response = ui.selectable_label(
-                    selected,
-                    RichText::new(format!("{header}\n{note_preview}")).color(theme::TEXT),
-                );
+                let mut label_text =
+                    RichText::new(format!("{header}\n{note_preview}"));
+                if in_range {
+                    label_text = label_text.color(theme::TEXT);
+                } else {
+                    label_text = label_text.color(theme::TEXT_MUTED).italics();
+                }
+                let response = ui.selectable_label(selected, label_text);
+                let response = if in_range {
+                    response
+                } else {
+                    response.on_hover_text(
+                        "Outside the trim range — excluded from playback and export until the yellow handles cover it",
+                    )
+                };
                 if response.clicked() {
                     jump_to = Some(frame_index);
                     if v.selected_moment != Some(i) {
@@ -1110,7 +1218,7 @@ impl FrammpegApp {
         if total == 0 {
             return;
         }
-        let last = total - 1;
+        let (lo, hi) = trim_range(v);
         let mut cur = v.current_frame;
         let mut toggle_play = false;
         let mut undo_requested = false;
@@ -1135,13 +1243,16 @@ impl FrammpegApp {
                     }
                     let big = modifiers.shift;
                     let step = if big { 10 } else { 1 };
+                    // Any step out of the trim range snaps back into range —
+                    // seed the step position by clamping current into [lo, hi].
+                    let start = cur.clamp(lo, hi);
                     match key {
-                        Key::ArrowLeft => cur = cur.saturating_sub(step),
-                        Key::ArrowRight => cur = (cur + step).min(last),
-                        Key::Home => cur = 0,
-                        Key::End => cur = last,
-                        Key::Comma => cur = cur.saturating_sub(1),
-                        Key::Period => cur = (cur + 1).min(last),
+                        Key::ArrowLeft => cur = start.saturating_sub(step).max(lo),
+                        Key::ArrowRight => cur = (start + step).min(hi),
+                        Key::Home => cur = lo,
+                        Key::End => cur = hi,
+                        Key::Comma => cur = start.saturating_sub(1).max(lo),
+                        Key::Period => cur = (start + 1).min(hi),
                         Key::Space => toggle_play = true,
                         _ => {}
                     }
@@ -1162,6 +1273,8 @@ impl FrammpegApp {
             let mut state = HistoryState {
                 annotations: &mut v.annotations,
                 moments: &mut v.moments,
+                trim_start: &mut v.trim_start,
+                trim_end: &mut v.trim_end,
             };
             if let Some(action) = v.history.undo(&mut state) {
                 v.after_history_change(&action);
@@ -1172,11 +1285,24 @@ impl FrammpegApp {
             let mut state = HistoryState {
                 annotations: &mut v.annotations,
                 moments: &mut v.moments,
+                trim_start: &mut v.trim_start,
+                trim_end: &mut v.trim_end,
             };
             if let Some(action) = v.history.redo(&mut state) {
                 v.after_history_change(&action);
             }
         }
+    }
+}
+
+fn trim_range(v: &VideoState) -> (usize, usize) {
+    if v.total_frames == 0 {
+        return (0, 0);
+    }
+    if v.trim_enabled() {
+        (v.trim_start, v.trim_end)
+    } else {
+        (0, v.total_frames - 1)
     }
 }
 
