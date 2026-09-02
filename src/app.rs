@@ -629,7 +629,7 @@ impl FrammpegApp {
         ui.vertical(|ui| {
             // Transport row (centered).
             let icons = &mut self.icons;
-            let action = ui
+            let (action, updated_needs_focus) = ui
                 .allocate_ui(Vec2::new(ui.available_width(), TRANSPORT_ROW_H), |ui| {
                     transport::draw(
                         ui,
@@ -652,7 +652,7 @@ impl FrammpegApp {
                 self.apply_transport(a);
             }
             if let Phase::Ready(v) = &mut self.phase {
-                v.frame_input_needs_focus = false;
+                v.frame_input_needs_focus = updated_needs_focus;
             }
 
             ui.add_space(2.0);
