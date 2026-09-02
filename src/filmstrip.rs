@@ -1,4 +1,5 @@
 use egui::{
+    scroll_area::{DragScroll, ScrollSource},
     Align, Align2, Color32, CornerRadius, FontId, Pos2, Rect, Response, ScrollArea, Sense, Stroke,
     Ui, Vec2,
 };
@@ -166,6 +167,8 @@ pub struct FilmstripDrawParams<'a> {
     pub thumbs: &'a mut ThumbCache,
     /// Use instant (non-animated) scroll for large jumps (Home/End).
     pub instant_scroll: bool,
+    /// Accumulator for scroll-to-scrub, converted to frame steps.
+    pub scroll_accumulator: &'a mut f32,
 }
 
 /// Draw the filmstrip inside `ui`, returning a request for the caller to seek
@@ -181,6 +184,7 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
         trim_end,
         thumbs,
         instant_scroll,
+        scroll_accumulator,
     } = params;
 
     let mut action = FilmstripAction::default();
@@ -206,6 +210,11 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
     ScrollArea::horizontal()
         .id_salt("frammpeg-filmstrip")
         .auto_shrink([false, false])
+        .scroll_source(ScrollSource {
+            scroll_bar: true,
+            drag: DragScroll::Never,
+            mouse_wheel: false,
+        })
         .show_viewport(ui, |ui, viewport| {
             let left_pad = viewport.width() * 0.5;
             let right_pad = left_pad;
@@ -291,6 +300,31 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
                     trim_enabled,
                     &mut action,
                 );
+            }
+
+            if seek_response.hovered() {
+                let scroll_delta = ui.input(|i| i.smooth_scroll_delta);
+                let delta_combined = scroll_delta.x + scroll_delta.y;
+                *scroll_accumulator += delta_combined;
+
+                let pitch = geom.pitch();
+                if pitch > 0.0 && scroll_accumulator.abs() >= pitch {
+                    let frames_to_seek = (scroll_accumulator.abs() / pitch).floor() as isize;
+                    if frames_to_seek > 0 {
+                        let direction = if *scroll_accumulator > 0.0 { 1 } else { -1 };
+                        let new_frame = (current_frame as isize + direction * frames_to_seek)
+                            .max(0)
+                            .min(total_frames.saturating_sub(1) as isize)
+                            as usize;
+                        let clamped_frame = if trim_enabled {
+                            new_frame.clamp(*trim_start, *trim_end)
+                        } else {
+                            new_frame
+                        };
+                        action.seek_to = Some(clamped_frame);
+                        *scroll_accumulator -= direction as f32 * frames_to_seek as f32 * pitch;
+                    }
+                }
             }
         });
 

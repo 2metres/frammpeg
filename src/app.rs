@@ -14,8 +14,8 @@ use crate::extract::{spawn_extraction, ExtractEvent};
 use crate::filmstrip::{self, FilmstripDrawParams, FilmstripGeometry, TrimHandle};
 use crate::history::{Action, History, HistoryState, HISTORY_CAP};
 use crate::model::{
-    Annotation, Moment, DEFAULT_FONT_SIZE, DEFAULT_STROKE_RGBA, DEFAULT_STROKE_WIDTH,
-    DEFAULT_TEXT_RGBA, MAX_BUFFER,
+    Annotation, Moment, DEFAULT_BUFFER, DEFAULT_FONT_SIZE, DEFAULT_STROKE_RGBA,
+    DEFAULT_STROKE_WIDTH, DEFAULT_TEXT_RGBA, MAX_BUFFER,
 };
 use crate::session::{self, SessionDirs};
 use crate::thumbs::{self, ThumbCache};
@@ -84,6 +84,7 @@ struct VideoState {
     trim_start: usize,
     trim_end: usize,
     trim_edit: Option<TrimEditSnapshot>,
+    scroll_accumulator: f32,
 }
 
 struct NoteEditSnapshot {
@@ -149,6 +150,7 @@ impl VideoState {
             trim_start: 0,
             trim_end,
             trim_edit: None,
+            scroll_accumulator: 0.0,
         }
     }
 
@@ -642,6 +644,7 @@ impl FrammpegApp {
                         trim_end: &mut v.trim_end,
                         thumbs: &mut v.thumbs,
                         instant_scroll,
+                        scroll_accumulator: &mut v.scroll_accumulator,
                     },
                 );
                 if let Some(which) = action.trim_drag_started {
