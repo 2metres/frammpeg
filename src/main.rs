@@ -6,6 +6,7 @@ mod export;
 mod extract;
 mod filmstrip;
 mod fonts;
+mod history;
 mod model;
 mod session;
 mod theme;
