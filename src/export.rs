@@ -4,19 +4,19 @@ use std::path::{Path, PathBuf};
 
 use ab_glyph::FontRef;
 use chrono::Local;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::annotate;
 use crate::model::{buffer_range_within, Annotation, Moment};
 use crate::session;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ExportManifest {
     pub export: ExportMeta,
     pub moments: Vec<MomentEntry>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ExportMeta {
     pub timestamp: String,
     pub source_range: [usize; 2],
@@ -24,16 +24,15 @@ pub struct ExportMeta {
     pub video: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MomentEntry {
     pub frame: usize,
     pub buffer: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     pub annotations: Vec<AnnotationEntry>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum AnnotationEntry {
     Rect {
@@ -64,8 +63,6 @@ pub struct PlannedFile {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlannedMoment {
     pub dir: PathBuf,
-    pub note_path: PathBuf,
-    pub note_body: String,
     pub files: Vec<PlannedFile>,
 }
 
@@ -112,41 +109,7 @@ pub fn plan_moment(
         });
     }
 
-    let note_path = dir.join("note.md");
-    let note_body = note_markdown(moment, trim_start, trim_end, total_frames);
-
-    Some(PlannedMoment {
-        dir,
-        note_path,
-        note_body,
-        files,
-    })
-}
-
-fn note_markdown(
-    moment: &Moment,
-    trim_start: usize,
-    trim_end: usize,
-    total_frames: usize,
-) -> String {
-    let stamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let disk_index = moment.frame_index + 1;
-    let body = if moment.note.trim().is_empty() {
-        "(no note)".to_string()
-    } else {
-        moment.note.trim().to_string()
-    };
-    format!(
-        "# Frame {disk_index}\n\n\
-         Exported: {stamp}\n\
-         Source range: {r_lo}\u{2013}{r_hi} / {total}\n\
-         Buffer: +/- {buf} frames\n\n\
-         {body}\n",
-        r_lo = trim_start + 1,
-        r_hi = trim_end + 1,
-        total = total_frames,
-        buf = moment.buffer,
-    )
+    Some(PlannedMoment { dir, files })
 }
 
 pub fn write_planned(
@@ -162,7 +125,6 @@ pub fn write_planned(
             std::fs::copy(&file.source, &file.target)?;
         }
     }
-    std::fs::write(&plan.note_path, &plan.note_body)?;
     Ok(())
 }
 
@@ -237,6 +199,7 @@ pub struct ExportResult {
     pub moments_written: usize,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn export_all(
     moments: &[Moment],
     annotations: &HashMap<usize, Vec<Annotation>>,
@@ -245,12 +208,13 @@ pub fn export_all(
     trim_end: usize,
     frames_dir: &Path,
     export_root: &Path,
+    video_path: &Path,
 ) -> io::Result<ExportResult> {
     std::fs::create_dir_all(export_root)?;
     let font = annotate::font();
     let mut written = 0usize;
-    // Walk moments in order but only assign folder numbers to the in-range
-    // ones so `moment-01`, `moment-02` etc. stay contiguous in the export.
+    let mut moment_entries = Vec::new();
+
     let mut folder_index = 0usize;
     for moment in moments {
         if moment.frame_index < trim_start || moment.frame_index > trim_end {
@@ -272,8 +236,42 @@ pub fn export_all(
         let empty = Vec::new();
         let anns = annotations.get(&moment.frame_index).unwrap_or(&empty);
         write_planned(&plan, anns, &font)?;
+
+        let note = if moment.note.trim().is_empty() {
+            None
+        } else {
+            Some(moment.note.trim().to_string())
+        };
+
+        moment_entries.push(MomentEntry {
+            frame: moment.frame_index + 1,
+            buffer: moment.buffer,
+            note,
+            annotations: anns.iter().map(annotation_to_entry).collect(),
+        });
+
         written += 1;
     }
+
+    let timestamp = Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+    let video_filename = video_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+
+    let manifest = ExportManifest {
+        export: ExportMeta {
+            timestamp,
+            source_range: [trim_start + 1, trim_end + 1],
+            total_frames,
+            video: video_filename,
+        },
+        moments: moment_entries,
+    };
+
+    write_moments_yaml(export_root, &manifest)?;
+
     Ok(ExportResult {
         moments_written: written,
     })
@@ -282,7 +280,7 @@ pub fn export_all(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{DEFAULT_BUFFER, DEFAULT_STROKE_RGBA, DEFAULT_STROKE_WIDTH};
+    use crate::model::{DEFAULT_STROKE_RGBA, DEFAULT_STROKE_WIDTH};
 
     #[test]
     fn plan_layout_for_middle_frame() {
@@ -421,43 +419,6 @@ mod tests {
     }
 
     #[test]
-    fn note_body_includes_frame_and_buffer() {
-        let m = Moment {
-            frame_index: 40,
-            buffer: DEFAULT_BUFFER,
-            note: "  a note  ".to_string(),
-        };
-        let body = note_markdown(&m, 0, 99, 100);
-        assert!(body.contains("Frame 41"));
-        assert!(body.contains("Buffer: +/- 5"));
-        assert!(body.contains("a note"));
-    }
-
-    #[test]
-    fn note_body_includes_source_range() {
-        let m = Moment {
-            frame_index: 40,
-            buffer: DEFAULT_BUFFER,
-            note: "n".to_string(),
-        };
-        let body = note_markdown(&m, 10, 60, 100);
-        assert!(
-            body.contains("Source range: 11\u{2013}61 / 100"),
-            "note body missing source range line: {body}"
-        );
-    }
-
-    #[test]
-    fn note_body_placeholder_when_empty() {
-        let m = Moment {
-            frame_index: 0,
-            buffer: 1,
-            note: "   ".to_string(),
-        };
-        assert!(note_markdown(&m, 0, 9, 10).contains("(no note)"));
-    }
-
-    #[test]
     fn end_to_end_export_writes_files() {
         // Build a tiny fake session with two clean frames, export a moment
         // with buffer 0 (single frame) and one rectangle annotation.
@@ -489,14 +450,13 @@ mod tests {
             }],
         );
 
-        let result = export_all(&[moment], &anns, 2, 0, 1, &frames, &export).unwrap();
+        let video = tmp.join("test.mp4");
+        let result = export_all(&[moment], &anns, 2, 0, 1, &frames, &export, &video).unwrap();
         assert_eq!(result.moments_written, 1);
 
         let moment_dir = export.join("moment-01");
         let annotated = moment_dir.join("frame-0001-annotated.png");
-        let note = moment_dir.join("note.md");
         assert!(annotated.exists(), "expected {:?}", annotated);
-        assert!(note.exists(), "expected {:?}", note);
         // The clean single-frame case emits only the annotated one for that index.
         assert!(!moment_dir.join("frame-0001.png").exists());
 
@@ -507,9 +467,36 @@ mod tests {
             "annotation should be burned into export"
         );
 
-        let note_body = std::fs::read_to_string(&note).unwrap();
-        assert!(note_body.contains("boxy"));
-        assert!(note_body.contains("Frame 1"));
+        let yaml_path = export.join("moments.yaml");
+        assert!(yaml_path.exists(), "expected moments.yaml");
+        let yaml_str = std::fs::read_to_string(&yaml_path).unwrap();
+        let manifest: ExportManifest = serde_saphyr::from_str(&yaml_str).unwrap();
+        assert_eq!(manifest.export.total_frames, 2);
+        assert_eq!(manifest.export.source_range, [1, 2]);
+        assert_eq!(manifest.export.video, "test.mp4");
+        assert_eq!(manifest.moments.len(), 1);
+        assert_eq!(manifest.moments[0].frame, 1);
+        assert_eq!(manifest.moments[0].buffer, 0);
+        assert_eq!(manifest.moments[0].note, Some("boxy".to_string()));
+        assert_eq!(manifest.moments[0].annotations.len(), 1);
+        match &manifest.moments[0].annotations[0] {
+            AnnotationEntry::Rect {
+                x,
+                y,
+                w,
+                h,
+                stroke,
+                stroke_width,
+            } => {
+                assert_eq!(*x, 2.0);
+                assert_eq!(*y, 2.0);
+                assert_eq!(*w, 10.0);
+                assert_eq!(*h, 10.0);
+                assert_eq!(stroke, "#FF3D71");
+                assert_eq!(*stroke_width, DEFAULT_STROKE_WIDTH);
+            }
+            _ => panic!("expected Rect annotation"),
+        }
 
         std::fs::remove_dir_all(&tmp).ok();
     }
@@ -544,14 +531,136 @@ mod tests {
             },
         ];
         let anns = HashMap::new();
+        let video = tmp.join("clip.mp4");
         // Trim range [3, 7] excludes the first and third moments.
-        let result = export_all(&moments, &anns, 10, 3, 7, &frames, &export).unwrap();
+        let result = export_all(&moments, &anns, 10, 3, 7, &frames, &export, &video).unwrap();
         assert_eq!(result.moments_written, 1);
         assert!(export.join("moment-01").exists());
         assert!(!export.join("moment-02").exists());
-        let note_body = std::fs::read_to_string(export.join("moment-01/note.md")).unwrap();
-        assert!(note_body.contains("in"));
-        assert!(note_body.contains("Source range: 4\u{2013}8 / 10"));
+
+        let yaml_str = std::fs::read_to_string(export.join("moments.yaml")).unwrap();
+        let manifest: ExportManifest = serde_saphyr::from_str(&yaml_str).unwrap();
+        assert_eq!(manifest.export.source_range, [4, 8]);
+        assert_eq!(manifest.export.total_frames, 10);
+        assert_eq!(manifest.export.video, "clip.mp4");
+        assert_eq!(manifest.moments.len(), 1);
+        assert_eq!(manifest.moments[0].frame, 6);
+        assert_eq!(manifest.moments[0].note, Some("in".to_string()));
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn moments_yaml_round_trips_rect_and_text() {
+        let tmp = tempdir();
+        let frames = tmp.join("frames");
+        let export = tmp.join("export");
+        std::fs::create_dir_all(&frames).unwrap();
+        std::fs::create_dir_all(&export).unwrap();
+
+        let white = image::RgbaImage::from_pixel(10, 10, image::Rgba([255, 255, 255, 255]));
+        white.save(session::frame_path(&frames, 0)).unwrap();
+
+        let moment = Moment {
+            frame_index: 0,
+            buffer: 0,
+            note: "both shapes".to_string(),
+        };
+        let mut anns = HashMap::new();
+        anns.insert(
+            0usize,
+            vec![
+                Annotation::Rect {
+                    x: 1.0,
+                    y: 2.0,
+                    w: 3.0,
+                    h: 4.0,
+                    stroke_color: [0xAA, 0xBB, 0xCC, 0xFF],
+                    stroke_width: 2.5,
+                },
+                Annotation::Text {
+                    x: 5.0,
+                    y: 6.0,
+                    text: "label".to_string(),
+                    font_size: 14.0,
+                    color: [0x11, 0x22, 0x33, 0x44],
+                },
+            ],
+        );
+
+        let video = tmp.join("shapes.mp4");
+        let result = export_all(&[moment], &anns, 1, 0, 0, &frames, &export, &video).unwrap();
+        assert_eq!(result.moments_written, 1);
+
+        let yaml_str = std::fs::read_to_string(export.join("moments.yaml")).unwrap();
+        let manifest: ExportManifest = serde_saphyr::from_str(&yaml_str).unwrap();
+        assert_eq!(manifest.moments.len(), 1);
+        assert_eq!(manifest.moments[0].annotations.len(), 2);
+
+        match &manifest.moments[0].annotations[0] {
+            AnnotationEntry::Rect {
+                x,
+                y,
+                w,
+                h,
+                stroke,
+                stroke_width,
+            } => {
+                assert_eq!(*x, 1.0);
+                assert_eq!(*y, 2.0);
+                assert_eq!(*w, 3.0);
+                assert_eq!(*h, 4.0);
+                assert_eq!(stroke, "#AABBCC");
+                assert_eq!(*stroke_width, 2.5);
+            }
+            _ => panic!("expected Rect as first annotation"),
+        }
+
+        match &manifest.moments[0].annotations[1] {
+            AnnotationEntry::Text {
+                x,
+                y,
+                text,
+                font_size,
+                color,
+            } => {
+                assert_eq!(*x, 5.0);
+                assert_eq!(*y, 6.0);
+                assert_eq!(text, "label");
+                assert_eq!(*font_size, 14.0);
+                assert_eq!(color, "#11223344");
+            }
+            _ => panic!("expected Text as second annotation"),
+        }
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn empty_note_serializes_as_yaml_null() {
+        let tmp = tempdir();
+        let frames = tmp.join("frames");
+        let export = tmp.join("export");
+        std::fs::create_dir_all(&frames).unwrap();
+        std::fs::create_dir_all(&export).unwrap();
+
+        let white = image::RgbaImage::from_pixel(10, 10, image::Rgba([255, 255, 255, 255]));
+        white.save(session::frame_path(&frames, 0)).unwrap();
+
+        let moment = Moment {
+            frame_index: 0,
+            buffer: 0,
+            note: "   ".to_string(),
+        };
+        let anns = HashMap::new();
+        let video = tmp.join("empty.mp4");
+        let result = export_all(&[moment], &anns, 1, 0, 0, &frames, &export, &video).unwrap();
+        assert_eq!(result.moments_written, 1);
+
+        let yaml_str = std::fs::read_to_string(export.join("moments.yaml")).unwrap();
+        assert!(yaml_str.contains("note: null") || yaml_str.contains("note: ~"));
+        let manifest: ExportManifest = serde_saphyr::from_str(&yaml_str).unwrap();
+        assert_eq!(manifest.moments[0].note, None);
 
         std::fs::remove_dir_all(&tmp).ok();
     }
