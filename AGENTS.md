@@ -54,6 +54,25 @@ cargo install cargo-nextest --version 0.9.72 --locked
 
 Project test config lives in `.config/nextest.toml`. Both `cargo test` and `cargo nextest run` work.
 
+## Spell-Checking
+
+The repo uses [typos-cli](https://github.com/crate-ci/typos) to catch spelling errors in identifiers and comments.
+
+**Global install:**
+```bash
+cargo install typos-cli
+```
+
+**Usage:**
+```bash
+typos                         # check entire repo
+typos --write-changes         # auto-fix typos
+```
+
+Configuration lives in `_typos.toml` at repo root. The allowlist is there for legitimate technical terms that typos flags as errors.
+
+**Integration:** Consider wiring typos into lefthook pre-commit as a soft check (warn-not-fail) — useful for catching obvious typos early without blocking commits when it over-flags.
+
 ## Architecture Overview
 
 Single-binary Rust desktop app, three layers:

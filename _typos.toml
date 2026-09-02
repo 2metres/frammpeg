@@ -1,0 +1,16 @@
+# Configuration for typos-cli spell-checker
+# https://github.com/crate-ci/typos
+
+[files]
+extend-exclude = [
+  "target/",
+  ".beads/",
+  "assets/fonts/",
+  "assets/icons/",
+]
+
+[default]
+# Allowlist for false positives (technical terms, proper nouns, etc.)
+# Add entries here as needed when typos flags legitimate identifiers or words.
+extend-ignore-identifiers-re = []
+extend-ignore-words = []
