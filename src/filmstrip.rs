@@ -1,5 +1,5 @@
 use egui::{
-    scroll_area::{DragScroll, ScrollSource},
+    scroll_area::{DragScroll, ScrollBarVisibility, ScrollSource},
     Align, Align2, Color32, CornerRadius, FontId, Pos2, Rect, Response, ScrollArea, Sense, Stroke,
     Ui, Vec2,
 };
@@ -210,8 +210,9 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
     ScrollArea::horizontal()
         .id_salt("frammpeg-filmstrip")
         .auto_shrink([false, false])
+        .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
         .scroll_source(ScrollSource {
-            scroll_bar: true,
+            scroll_bar: false,
             drag: DragScroll::Never,
             mouse_wheel: false,
         })
