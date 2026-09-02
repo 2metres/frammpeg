@@ -47,13 +47,19 @@ pub fn draw(
     let mut new_scale = view.strip_scale;
 
     ui.horizontal(|ui| {
+        let row_start = ui.cursor().left();
+        let total_w = ui.available_width();
+        let row_center = row_start + total_w * 0.5;
+
         ui.spacing_mut().item_spacing.x = BUTTON_GAP;
 
         render_frame_badge(ui, current_frame + 1, total_frames);
         ui.add_space(BUTTON_GAP);
+        let after_badge_x = ui.cursor().left();
 
-        let pad = ((ui.available_width() - ROW_WIDTH) * 0.5).max(0.0);
-        ui.add_space(pad);
+        let target_playback_left = row_center - ROW_WIDTH * 0.5;
+        let pad_before = (target_playback_left - after_badge_x).max(0.0);
+        ui.add_space(pad_before);
 
         if step_button(
             ui,
