@@ -6,7 +6,7 @@ use egui::{
 use crate::theme;
 use crate::thumbs::ThumbCache;
 
-pub const TRIM_HANDLE_W: f32 = 14.0;
+pub const TRIM_HANDLE_W: f32 = 22.0;
 pub const TRIM_RAIL_H: f32 = 4.0;
 
 /// Which of the two trim handles a drag is affecting.
@@ -392,20 +392,31 @@ fn paint_trim_handle(painter: &egui::Painter, rect: Rect, hovered_or_dragged: bo
     } else {
         theme::TRIM_ACCENT
     };
-    painter.rect_filled(rect, CornerRadius::same(3), fill);
+    painter.rect_filled(rect, CornerRadius::same(4), fill);
     painter.rect_stroke(
         rect,
-        CornerRadius::same(3),
-        Stroke::new(1.0, Color32::from_rgba_unmultiplied(0x00, 0x00, 0x00, 90)),
+        CornerRadius::same(4),
+        Stroke::new(1.0, Color32::from_rgba_unmultiplied(0x00, 0x00, 0x00, 120)),
         egui::StrokeKind::Outside,
     );
-    // A tiny center groove to sell it as a grabber.
+    // Two vertical grip lines for a more tactile grabber feel.
     let cx = rect.center().x;
-    let groove_top = rect.top() + rect.height() * 0.35;
-    let groove_bottom = rect.bottom() - rect.height() * 0.35;
+    let grip_top = rect.top() + rect.height() * 0.35;
+    let grip_bottom = rect.bottom() - rect.height() * 0.35;
+    let grip_stroke = Stroke::new(2.0, Color32::from_rgba_unmultiplied(0x00, 0x00, 0x00, 160));
     painter.line_segment(
-        [Pos2::new(cx, groove_top), Pos2::new(cx, groove_bottom)],
-        Stroke::new(1.0, Color32::from_rgba_unmultiplied(0x00, 0x00, 0x00, 120)),
+        [
+            Pos2::new(cx - 3.0, grip_top),
+            Pos2::new(cx - 3.0, grip_bottom),
+        ],
+        grip_stroke,
+    );
+    painter.line_segment(
+        [
+            Pos2::new(cx + 3.0, grip_top),
+            Pos2::new(cx + 3.0, grip_bottom),
+        ],
+        grip_stroke,
     );
 }
 
