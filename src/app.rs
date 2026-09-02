@@ -79,6 +79,7 @@ struct VideoState {
     annotations: HashMap<usize, Vec<Annotation>>,
     moments: Vec<Moment>,
     selected_moment: Option<usize>,
+    moments_panel_open: bool,
     tool: Tool,
     drag: Option<DragRect>,
     editing_text: Option<usize>,
@@ -147,6 +148,7 @@ impl VideoState {
             annotations: HashMap::new(),
             moments: Vec::new(),
             selected_moment: None,
+            moments_panel_open: false,
             tool: Tool::Rect,
             drag: None,
             editing_text: None,
@@ -278,6 +280,7 @@ impl VideoState {
         };
         let index = self.moments.len();
         self.moments.push(moment.clone());
+        self.moments_panel_open = true;
         self.history.record(Action::MomentCreated { index, moment });
     }
 
@@ -293,6 +296,9 @@ impl VideoState {
             if sel >= self.moments.len() {
                 self.selected_moment = None;
             }
+        }
+        if matches!(action, Action::MomentCreated { .. }) {
+            self.moments_panel_open = true;
         }
         if matches!(
             action,
@@ -520,23 +526,29 @@ impl FrammpegApp {
                 v.tool = tool;
 
                 ui.separator();
-                let can_mark = v.in_trim(v.current_frame);
-                let mark_tooltip = if can_mark {
-                    "Add the current frame to Moments"
+                let moments_count = v.moments.len();
+                let moments_label = if moments_count > 0 && !v.moments_panel_open {
+                    format!("{}", moments_count)
                 } else {
-                    "Current frame is outside the trim range — move the yellow handles first"
+                    String::new()
                 };
-                let mark_response = ui.add_enabled(can_mark, egui::Button::new("Mark notable"));
-                if mark_response.on_hover_text(mark_tooltip).clicked() && can_mark {
-                    v.finalize_pending_edits();
-                    let frame = v.current_frame;
-                    if !v.moments.iter().any(|m| m.frame_index == frame) {
-                        let moment = Moment::new(frame);
-                        let index = v.moments.len();
-                        v.moments.push(moment.clone());
-                        v.history.record(Action::MomentCreated { index, moment });
-                    }
-                    v.selected_moment = v.moments.iter().position(|m| m.frame_index == frame);
+                let moments_tooltip = if v.moments_panel_open {
+                    "Hide moments panel"
+                } else {
+                    "Show moments panel"
+                };
+                if tool_button(ui, icons, Icon::Bookmark, v.moments_panel_open)
+                    .on_hover_text(moments_tooltip)
+                    .clicked()
+                {
+                    v.moments_panel_open = !v.moments_panel_open;
+                }
+                if !moments_label.is_empty() {
+                    ui.label(
+                        RichText::new(moments_label)
+                            .small()
+                            .color(theme::TEXT_MUTED),
+                    );
                 }
 
                 ui.separator();
@@ -785,7 +797,20 @@ impl FrammpegApp {
 
     fn moments_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(2.0);
-        ui.label(RichText::new("Moments").color(theme::TEXT).strong());
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Moments").color(theme::TEXT).strong());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui
+                    .button(RichText::new("✕").color(theme::TEXT_MUTED))
+                    .on_hover_text("Close panel")
+                    .clicked()
+                {
+                    if let Phase::Ready(v) = &mut self.phase {
+                        v.moments_panel_open = false;
+                    }
+                }
+            });
+        });
         ui.separator();
 
         let Phase::Ready(v) = &mut self.phase else {
@@ -797,7 +822,7 @@ impl FrammpegApp {
             ui.label(RichText::new("no moments yet").color(theme::TEXT_MUTED));
             ui.add_space(6.0);
             ui.label(
-                RichText::new("Hit 'Mark notable' on the toolbar to save the current frame.")
+                RichText::new("Add a rectangle or text annotation to auto-create a moment.")
                     .small()
                     .color(theme::TEXT_MUTED),
             );
@@ -1435,11 +1460,15 @@ impl eframe::App for FrammpegApp {
             .frame(panel_frame)
             .show(ui, |ui| self.bottom_panel(ui));
 
-        Panel::right("moments")
-            .default_size(260.0)
-            .min_size(220.0)
-            .frame(Frame::default().fill(theme::PANEL).inner_margin(10.0))
-            .show(ui, |ui| self.moments_panel(ui));
+        if let Phase::Ready(v) = &self.phase {
+            if v.moments_panel_open {
+                Panel::right("moments")
+                    .default_size(260.0)
+                    .min_size(220.0)
+                    .frame(Frame::default().fill(theme::PANEL).inner_margin(10.0))
+                    .show(ui, |ui| self.moments_panel(ui));
+            }
+        }
 
         CentralPanel::default()
             .frame(Frame::default().fill(theme::CANVAS).inner_margin(8.0))
@@ -1484,5 +1513,16 @@ mod tests {
         v.trim_start = 10;
         v.trim_end = 50;
         assert!(v.trim_enabled());
+    }
+
+    #[test]
+    fn moments_panel_opens_on_first_moment_created() {
+        let mut v = make_test_state(100);
+        assert!(!v.moments_panel_open);
+        assert!(v.moments.is_empty());
+        let moment = Moment::new(5);
+        v.moments.push(moment);
+        v.moments_panel_open = true;
+        assert!(v.moments_panel_open);
     }
 }
