@@ -471,37 +471,6 @@ impl FrammpegApp {
         ctx.request_repaint_after(Duration::from_millis(100));
     }
 
-    fn header_label(&self) -> String {
-        match &self.phase {
-            Phase::Empty => "no video loaded".into(),
-            Phase::Extracting(s) => {
-                let name = s
-                    .video_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "video".into());
-                if s.preparing {
-                    format!("{name}  -  preparing ffmpeg...")
-                } else {
-                    format!("{name}  -  extracting frame {}", s.current)
-                }
-            }
-            Phase::Ready(v) => {
-                let name = v
-                    .video_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "video".into());
-                format!(
-                    "{name}  -  frame {}/{}",
-                    v.current_frame + 1,
-                    v.total_frames
-                )
-            }
-            Phase::Error(msg) => format!("error: {msg}"),
-        }
-    }
-
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         let Self { phase, icons, .. } = self;
         ui.horizontal(|ui| {
