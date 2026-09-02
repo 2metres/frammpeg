@@ -995,6 +995,18 @@ impl FrammpegApp {
             }
             if let Some(i) = delete {
                 v.finalize_pending_edits();
+                let frame = v.moments[i].frame_index;
+                if let Some(list) = v.annotations.get_mut(&frame) {
+                    let anns = std::mem::take(list);
+                    v.annotations.remove(&frame);
+                    for (idx, ann) in anns.into_iter().enumerate().rev() {
+                        v.history.record(Action::AnnotationDeleted {
+                            frame,
+                            index: idx,
+                            annotation: ann,
+                        });
+                    }
+                }
                 let removed = v.moments.remove(i);
                 v.history.record(Action::MomentDeleted {
                     index: i,
