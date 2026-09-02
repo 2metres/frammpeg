@@ -39,6 +39,21 @@ cargo test                    # unit tests
 cargo clippy -- -D warnings   # lint
 ```
 
+## Dependency Auditing
+
+Periodically check for unused dependencies with `cargo machete`:
+
+```bash
+cargo install cargo-machete   # one-time install
+cargo machete                 # find unused deps
+```
+
+Or use the wrapper script:
+
+```bash
+scripts/check-unused.sh
+```
+
 ## Architecture Overview
 
 Single-binary Rust desktop app, three layers:
