@@ -593,45 +593,18 @@ mod tests {
         assert_eq!(result.moments_written, 1);
 
         let yaml_str = std::fs::read_to_string(export.join("moments.yaml")).unwrap();
-        let manifest: ExportManifest = serde_saphyr::from_str(&yaml_str).unwrap();
-        assert_eq!(manifest.moments.len(), 1);
-        assert_eq!(manifest.moments[0].annotations.len(), 2);
-
-        match &manifest.moments[0].annotations[0] {
-            AnnotationEntry::Rect {
-                x,
-                y,
-                w,
-                h,
-                stroke,
-                stroke_width,
-            } => {
-                assert_eq!(*x, 1.0);
-                assert_eq!(*y, 2.0);
-                assert_eq!(*w, 3.0);
-                assert_eq!(*h, 4.0);
-                assert_eq!(stroke, "#AABBCC");
-                assert_eq!(*stroke_width, 2.5);
-            }
-            _ => panic!("expected Rect as first annotation"),
-        }
-
-        match &manifest.moments[0].annotations[1] {
-            AnnotationEntry::Text {
-                x,
-                y,
-                text,
-                font_size,
-                color,
-            } => {
-                assert_eq!(*x, 5.0);
-                assert_eq!(*y, 6.0);
-                assert_eq!(text, "label");
-                assert_eq!(*font_size, 14.0);
-                assert_eq!(color, "#11223344");
-            }
-            _ => panic!("expected Text as second annotation"),
-        }
+        let normalized = yaml_str
+            .lines()
+            .map(|line| {
+                if line.trim().starts_with("timestamp:") {
+                    "  timestamp: <redacted>"
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        insta::assert_snapshot!(normalized);
 
         std::fs::remove_dir_all(&tmp).ok();
     }

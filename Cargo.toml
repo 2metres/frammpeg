@@ -32,6 +32,7 @@ objc2-foundation = { version = "0.3", features = ["NSString"] }
 
 [dev-dependencies]
 egui_kittest = "0.36.1"
+insta = "1"
 
 [profile.release]
 lto = "thin"
