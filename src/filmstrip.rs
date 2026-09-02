@@ -26,6 +26,8 @@ pub struct FilmstripGeometry {
     pub label_every_n: usize,
     /// Extra thumbnails to prefetch on each side of the visible range.
     pub prefetch_pad: usize,
+    /// Left/right padding for center-active filmstrip (0.0 for tests).
+    pub left_pad: f32,
 }
 
 impl Default for FilmstripGeometry {
@@ -38,6 +40,7 @@ impl Default for FilmstripGeometry {
             label_h: 14.0,
             label_every_n: 5,
             prefetch_pad: 30,
+            left_pad: 0.0,
         }
     }
 }
@@ -71,8 +74,10 @@ impl FilmstripGeometry {
         if pitch <= 0.0 {
             return Some((0, last));
         }
-        let first = (x0 / pitch).floor().max(0.0) as usize;
-        let last_seen = ((x1 - self.gap) / pitch).ceil() as isize;
+        let x0_adj = (x0 - self.left_pad).max(0.0);
+        let x1_adj = (x1 - self.left_pad).max(0.0);
+        let first = (x0_adj / pitch).floor().max(0.0) as usize;
+        let last_seen = ((x1_adj - self.gap) / pitch).ceil() as isize;
         let last_seen = last_seen.max(0) as usize;
         let first = first.min(last);
         let last_visible = last_seen.min(last);
@@ -97,7 +102,7 @@ impl FilmstripGeometry {
     }
 
     pub fn thumb_rect(&self, container_origin: Pos2, index: usize) -> Rect {
-        let x = container_origin.x + index as f32 * self.pitch();
+        let x = container_origin.x + self.left_pad + index as f32 * self.pitch();
         let y = container_origin.y + self.top_pad;
         Rect::from_min_size(Pos2::new(x, y), Vec2::new(self.thumb_w, self.thumb_h))
     }
@@ -128,7 +133,8 @@ impl FilmstripGeometry {
         }
         let last = total_frames - 1;
         let pitch = self.pitch().max(1.0);
-        let idx = (x_content / pitch).floor().max(0.0) as usize;
+        let x_adj = (x_content - self.left_pad).max(0.0);
+        let idx = (x_adj / pitch).floor().max(0.0) as usize;
         idx.min(last)
     }
 }
@@ -164,7 +170,7 @@ pub struct FilmstripDrawParams<'a> {
 /// somewhere. The strip fills the width and its height is `geom.row_height()`.
 pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
     let FilmstripDrawParams {
-        geom,
+        mut geom,
         total_frames,
         current_frame,
         prev_current_frame,
@@ -198,8 +204,12 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
         .id_salt("frammpeg-filmstrip")
         .auto_shrink([false, false])
         .show_viewport(ui, |ui, viewport| {
+            let left_pad = viewport.width() * 0.5;
+            let right_pad = left_pad;
+            geom.left_pad = left_pad;
+            let padded_width = content_width + left_pad + right_pad;
             let (content_rect, seek_response) = ui.allocate_exact_size(
-                Vec2::new(content_width.max(viewport.width()), row_h),
+                Vec2::new(padded_width.max(viewport.width()), row_h),
                 Sense::click_and_drag(),
             );
             let painter = ui.painter_at(content_rect);
