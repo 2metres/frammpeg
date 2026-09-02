@@ -153,6 +153,7 @@ pub struct FilmstripDrawParams<'a> {
     pub total_frames: usize,
     pub current_frame: usize,
     pub prev_current_frame: usize,
+    pub trim_mode: bool,
     /// Mutable so the strip can update on handle drag.
     pub trim_start: &'a mut usize,
     pub trim_end: &'a mut usize,
@@ -167,6 +168,7 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
         total_frames,
         current_frame,
         prev_current_frame,
+        trim_mode,
         trim_start,
         trim_end,
         thumbs,
@@ -186,7 +188,7 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
 
     // Whether the yellow handles are meaningful. With fewer than two frames
     // there's nothing to trim; render just the plain strip in that case.
-    let trim_enabled = total_frames >= 2;
+    let trim_enabled = trim_mode && total_frames >= 2;
 
     let content_width = geom.total_width(total_frames);
     let row_h = geom.row_height();

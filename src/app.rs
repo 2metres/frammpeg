@@ -80,6 +80,7 @@ struct VideoState {
     history: History,
     note_edit: Option<NoteEditSnapshot>,
     buffer_edit: Option<BufferEditSnapshot>,
+    trim_mode: bool,
     trim_start: usize,
     trim_end: usize,
     trim_edit: Option<TrimEditSnapshot>,
@@ -144,6 +145,7 @@ impl VideoState {
             history: History::new(HISTORY_CAP),
             note_edit: None,
             buffer_edit: None,
+            trim_mode: false,
             trim_start: 0,
             trim_end,
             trim_edit: None,
@@ -151,7 +153,7 @@ impl VideoState {
     }
 
     fn trim_enabled(&self) -> bool {
-        self.total_frames >= 2 && self.trim_end > self.trim_start
+        self.trim_mode && self.total_frames >= 2 && self.trim_end > self.trim_start
     }
 
     fn in_trim(&self, frame: usize) -> bool {
@@ -502,14 +504,27 @@ impl FrammpegApp {
                 }
 
                 ui.separator();
-                let reset_enabled =
-                    v.total_frames > 0 && (v.trim_start != 0 || v.trim_end + 1 != v.total_frames);
-                let reset_response = ui.add_enabled(reset_enabled, egui::Button::new("Reset trim"));
-                if reset_response
-                    .on_hover_text("Reset the yellow trim handles to the full clip")
+                if ui
+                    .selectable_label(v.trim_mode, "Trim")
+                    .on_hover_text(
+                        "Enable trim mode — gate the active frame range with yellow handles",
+                    )
                     .clicked()
                 {
-                    v.reset_trim();
+                    v.trim_mode = !v.trim_mode;
+                }
+
+                if v.trim_mode {
+                    let reset_enabled = v.total_frames > 0
+                        && (v.trim_start != 0 || v.trim_end + 1 != v.total_frames);
+                    let reset_response =
+                        ui.add_enabled(reset_enabled, egui::Button::new("Reset trim"));
+                    if reset_response
+                        .on_hover_text("Reset the yellow trim handles to the full clip")
+                        .clicked()
+                    {
+                        v.reset_trim();
+                    }
                 }
 
                 ui.separator();
@@ -620,6 +635,7 @@ impl FrammpegApp {
                         total_frames: v.total_frames,
                         current_frame: v.current_frame,
                         prev_current_frame,
+                        trim_mode: v.trim_mode,
                         trim_start: &mut v.trim_start,
                         trim_end: &mut v.trim_end,
                         thumbs: &mut v.thumbs,
@@ -1374,5 +1390,38 @@ impl eframe::App for FrammpegApp {
                 ctx.request_repaint_after(transport::frame_period(v.fps));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_state(total_frames: usize) -> VideoState {
+        let session = SessionDirs {
+            root: PathBuf::from("/tmp/test"),
+            frames: PathBuf::from("/tmp/test/frames"),
+            export: PathBuf::from("/tmp/test/export"),
+        };
+        let ctx = egui::Context::default();
+        VideoState::new(session, PathBuf::from("test.mp4"), total_frames, 30.0, &ctx)
+    }
+
+    #[test]
+    fn trim_enabled_false_when_trim_mode_off() {
+        let mut v = make_test_state(100);
+        v.trim_mode = false;
+        v.trim_start = 10;
+        v.trim_end = 50;
+        assert!(!v.trim_enabled());
+    }
+
+    #[test]
+    fn trim_enabled_true_when_trim_mode_on_and_range_valid() {
+        let mut v = make_test_state(100);
+        v.trim_mode = true;
+        v.trim_start = 10;
+        v.trim_end = 50;
+        assert!(v.trim_enabled());
     }
 }
