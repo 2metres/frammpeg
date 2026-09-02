@@ -13,6 +13,7 @@ const SKIP_FORWARD: &[u8] = include_bytes!("../assets/icons/skip-forward.svg");
 const SQUARE: &[u8] = include_bytes!("../assets/icons/square.svg");
 const TYPE: &[u8] = include_bytes!("../assets/icons/type.svg");
 const SCISSORS: &[u8] = include_bytes!("../assets/icons/scissors.svg");
+const BOOKMARK: &[u8] = include_bytes!("../assets/icons/bookmark.svg");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
@@ -27,6 +28,7 @@ pub enum Icon {
     Rectangle,
     Text,
     Scissors,
+    Bookmark,
 }
 
 impl Icon {
@@ -43,6 +45,7 @@ impl Icon {
             Icon::Rectangle => SQUARE,
             Icon::Text => TYPE,
             Icon::Scissors => SCISSORS,
+            Icon::Bookmark => BOOKMARK,
         }
     }
 
@@ -59,6 +62,7 @@ impl Icon {
             Icon::Rectangle => "square",
             Icon::Text => "type",
             Icon::Scissors => "scissors",
+            Icon::Bookmark => "bookmark",
         }
     }
 }
@@ -240,6 +244,7 @@ mod tests {
             Icon::Rectangle,
             Icon::Text,
             Icon::Scissors,
+            Icon::Bookmark,
         ];
         let opt = usvg::Options::default();
         for icon in icons {

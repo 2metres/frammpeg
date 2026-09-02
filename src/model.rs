@@ -34,6 +34,7 @@ pub struct Moment {
 }
 
 impl Moment {
+    #[allow(dead_code)]
     pub fn new(frame_index: usize) -> Self {
         Self {
             frame_index,
