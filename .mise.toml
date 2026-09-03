@@ -1,0 +1,6 @@
+# Runtime versions for this project (managed by mise).
+# Cargo.toml uses edition = "2021" and does not pin rust-version;
+# tracking stable here. Bump when a Cargo msrv bump lands.
+
+[tools]
+rust = "1.98.0"
