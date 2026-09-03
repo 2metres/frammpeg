@@ -98,8 +98,9 @@ pub fn draw(
             {
                 action = Some(TransportAction::ToggleTrim);
             }
-            if view.trim_mode && view.can_reset_trim {
-                if icons
+            if view.trim_mode
+                && view.can_reset_trim
+                && icons
                     .ui(
                         ui,
                         Icon::RotateCcw,
@@ -110,9 +111,8 @@ pub fn draw(
                     )
                     .on_hover_text("Reset trim to full clip")
                     .clicked()
-                {
-                    action = Some(TransportAction::ResetTrim);
-                }
+            {
+                action = Some(TransportAction::ResetTrim);
             }
             ui.add_space(BUTTON_GAP);
             let after_trim_x = ui.cursor().left();
