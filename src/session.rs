@@ -61,18 +61,14 @@ mod tests {
 
     #[test]
     fn consecutive_sessions_have_unique_paths() {
-        let temp = std::env::temp_dir().join("frammpeg-test-sessions");
-        let _ = std::fs::remove_dir_all(&temp);
-        std::fs::create_dir_all(&temp).unwrap();
+        let temp = tempfile::TempDir::new().unwrap();
 
-        let s1 = create_session(&temp).unwrap();
-        let s2 = create_session(&temp).unwrap();
+        let s1 = create_session(temp.path()).unwrap();
+        let s2 = create_session(temp.path()).unwrap();
 
         assert_ne!(
             s1.root, s2.root,
             "two consecutive create_session calls must produce different paths"
         );
-
-        std::fs::remove_dir_all(&temp).unwrap();
     }
 }

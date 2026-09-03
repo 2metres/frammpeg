@@ -196,8 +196,6 @@ impl FilmstripGeometry {
 pub struct FilmstripAction {
     /// The user clicked or dragged onto this frame; caller should seek to it.
     pub seek_to: Option<usize>,
-    /// The user changed `current_frame` before this frame; scroll it into view.
-    pub scroll_into_view: bool,
     /// A trim handle drag started this frame — caller snapshots the current
     /// `(trim_start, trim_end)` so drag-release can record one history entry.
     pub trim_drag_started: Option<TrimHandle>,
@@ -210,7 +208,6 @@ pub struct FilmstripDrawParams<'a> {
     pub geom: FilmstripGeometry,
     pub total_frames: usize,
     pub current_frame: usize,
-    pub prev_current_frame: usize,
     pub trim_mode: bool,
     /// Mutable so the strip can update on handle drag.
     pub trim_start: &'a mut usize,
@@ -234,7 +231,6 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
         mut geom,
         total_frames,
         current_frame,
-        prev_current_frame,
         trim_mode,
         trim_start,
         trim_end,
@@ -264,7 +260,6 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
     let strip_positions = ((total_frames as f32) / (stride as f32)).ceil() as usize;
     let content_width = geom.total_width(strip_positions);
     let row_h = geom.row_height();
-    let want_scroll = current_frame != prev_current_frame;
 
     let strip_pos = frame_to_strip_pos(current_frame, stride);
     let default_target_offset = strip_pos as f32 * geom.pitch() + geom.thumb_w * 0.5;
@@ -335,10 +330,6 @@ pub fn draw(ui: &mut Ui, params: FilmstripDrawParams<'_>) -> FilmstripAction {
                     geom,
                     (trim_start_pos, trim_end_pos),
                 );
-            }
-
-            if want_scroll {
-                action.scroll_into_view = true;
             }
 
             let screen_viewport = Rect::from_min_max(

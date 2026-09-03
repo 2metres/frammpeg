@@ -616,7 +616,7 @@ impl FrammpegApp {
             enabled,
             playing,
             current_frame,
-            prev_current_frame,
+            _prev_current_frame,
             total_frames,
             trim_mode,
             can_reset_trim,
@@ -696,7 +696,6 @@ impl FrammpegApp {
                         geom: v.filmstrip_geom,
                         total_frames: v.total_frames,
                         current_frame: v.current_frame,
-                        prev_current_frame,
                         trim_mode: v.trim_mode,
                         trim_start: &mut v.trim_start,
                         trim_end: &mut v.trim_end,
@@ -1268,7 +1267,7 @@ impl FrammpegApp {
                     // Hit-test existing text annotations first.
                     let mut hit_index = None;
                     if let Some(list) = v.annotations.get(&current) {
-                        for (i, ann) in list.iter().enumerate() {
+                        for (i, ann) in list.iter().enumerate().rev() {
                             if let Annotation::Text {
                                 x,
                                 y,

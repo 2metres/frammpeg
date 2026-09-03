@@ -248,4 +248,49 @@ mod tests {
             "topmost pixel at y={top} but expected near y={y_coord} (TOP-aligned)"
         );
     }
+
+    #[test]
+    fn text_burn_offset_is_consistent() {
+        let font = font();
+        let test_cases = [(10.0, 16.0), (20.0, 24.0), (30.0, 32.0)];
+
+        for (y_coord, font_size) in test_cases {
+            let mut img = white_image(200, 100);
+            burn(
+                &mut img,
+                &[Annotation::Text {
+                    x: 10.0,
+                    y: y_coord,
+                    text: "Test".to_string(),
+                    font_size,
+                    color: [0, 0, 0, 255],
+                }],
+                &font,
+            );
+
+            let mut topmost = None;
+            for y in 0..100 {
+                for x in 0..200 {
+                    if img.get_pixel(x, y).0 != [255, 255, 255, 255] {
+                        topmost = Some(y);
+                        break;
+                    }
+                }
+                if topmost.is_some() {
+                    break;
+                }
+            }
+
+            assert!(
+                topmost.is_some(),
+                "text should be drawn for y={y_coord}, size={font_size}"
+            );
+            let top = topmost.unwrap() as f32;
+            let offset = top - y_coord;
+            assert!(
+                offset.abs() <= 1.0,
+                "offset at y={y_coord}, size={font_size} is {offset}px, expected ≤1px for consistent TOP alignment"
+            );
+        }
+    }
 }
