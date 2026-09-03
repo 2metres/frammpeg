@@ -1617,6 +1617,12 @@ impl eframe::App for FrammpegApp {
             self.appearance_set = true;
         }
 
+        // Re-apply custom visuals on every frame to prevent eframe from
+        // overriding them based on system theme changes. This ensures
+        // separators and other UI elements stay locked to our dark theme
+        // regardless of macOS system light/dark mode.
+        ctx.set_visuals(theme::visuals());
+
         self.poll_extraction(&ctx);
 
         let new_title = match &self.phase {
