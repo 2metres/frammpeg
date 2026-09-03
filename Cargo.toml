@@ -3,7 +3,7 @@ name = "frammpeg"
 version = "0.1.0"
 edition = "2021"
 description = "Portable Rust desktop tool for debugging HTML/CSS animation bugs via annotated video frames."
-authors = ["Andrew Carr <acarr@raywhite.com>"]
+authors = ["Andrew Carr <andrew@2metres.com>"]
 license = "MIT"
 publish = false
 
