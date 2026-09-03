@@ -25,6 +25,7 @@ pub enum TransportAction {
     End,
     TogglePlay,
     ToggleTrim,
+    ResetTrim,
     ScaleChanged(f32),
     FrameInputChanged(String),
     FrameInputCommit(String),
@@ -36,6 +37,7 @@ pub struct TransportView {
     pub enabled: bool,
     pub playing: bool,
     pub trim_mode: bool,
+    pub can_reset_trim: bool,
     pub strip_scale: f32,
     pub fps: f32,
     pub frame_input_edit: Option<String>,
@@ -95,6 +97,22 @@ pub fn draw(
                 .clicked()
             {
                 action = Some(TransportAction::ToggleTrim);
+            }
+            if view.trim_mode && view.can_reset_trim {
+                if icons
+                    .ui(
+                        ui,
+                        Icon::RotateCcw,
+                        18.0,
+                        theme::TEXT_MUTED,
+                        Vec2::new(STEP_BUTTON_W, STEP_BUTTON_H),
+                        false,
+                    )
+                    .on_hover_text("Reset trim to full clip")
+                    .clicked()
+                {
+                    action = Some(TransportAction::ResetTrim);
+                }
             }
             ui.add_space(BUTTON_GAP);
             let after_trim_x = ui.cursor().left();

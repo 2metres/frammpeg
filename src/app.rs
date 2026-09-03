@@ -384,6 +384,21 @@ impl VideoState {
             }
         }
     }
+
+    fn reset_trim(&mut self) {
+        if self.total_frames == 0 {
+            return;
+        }
+        self.finalize_pending_edits();
+        let old = (self.trim_start, self.trim_end);
+        let new = (0usize, self.total_frames - 1);
+        if old != new {
+            self.trim_start = new.0;
+            self.trim_end = new.1;
+            self.history.record(Action::TrimChanged { old, new });
+        }
+    }
+
     fn ensure_frame_texture(&mut self, ctx: &egui::Context, index: usize) -> Option<TextureHandle> {
         if let Some(pos) = self.frame_cache.iter().position(|(i, _)| *i == index) {
             let (_, tex) = self.frame_cache.remove(pos).unwrap();
@@ -604,6 +619,7 @@ impl FrammpegApp {
             prev_current_frame,
             total_frames,
             trim_mode,
+            can_reset_trim,
             strip_scale,
             fps,
             frame_input_edit,
@@ -612,6 +628,8 @@ impl FrammpegApp {
             let Phase::Ready(v) = &self.phase else {
                 return;
             };
+            let last = v.total_frames.saturating_sub(1);
+            let can_reset_trim = v.total_frames > 0 && (v.trim_start != 0 || v.trim_end != last);
             (
                 v.total_frames > 0,
                 v.playing,
@@ -619,6 +637,7 @@ impl FrammpegApp {
                 v.prev_current_frame,
                 v.total_frames,
                 v.trim_mode,
+                can_reset_trim,
                 v.strip_scale,
                 v.fps,
                 v.frame_input_edit.clone(),
@@ -638,6 +657,7 @@ impl FrammpegApp {
                             enabled,
                             playing,
                             trim_mode,
+                            can_reset_trim,
                             strip_scale,
                             fps,
                             frame_input_edit,
@@ -722,6 +742,9 @@ impl FrammpegApp {
             TransportAction::ToggleTrim => {
                 v.trim_mode = !v.trim_mode;
             }
+            TransportAction::ResetTrim => {
+                v.reset_trim();
+            }
             TransportAction::FrameInputChanged(s) => {
                 if v.frame_input_edit.is_none() {
                     v.frame_input_needs_focus = true;
@@ -768,6 +791,7 @@ impl FrammpegApp {
                     }
                     TransportAction::ScaleChanged(_)
                     | TransportAction::ToggleTrim
+                    | TransportAction::ResetTrim
                     | TransportAction::FrameInputChanged(_)
                     | TransportAction::FrameInputCommit(_)
                     | TransportAction::FrameInputCancel => {
@@ -1747,6 +1771,26 @@ mod tests {
         v.trim_start = 10;
         v.trim_end = 50;
         assert!(v.trim_enabled());
+    }
+
+    #[test]
+    fn reset_trim_snaps_range_to_full_clip() {
+        let mut v = make_test_state(100);
+        v.trim_start = 20;
+        v.trim_end = 60;
+        v.reset_trim();
+        assert_eq!(v.trim_start, 0);
+        assert_eq!(v.trim_end, 99);
+    }
+
+    #[test]
+    fn reset_trim_is_noop_when_already_full_range() {
+        let mut v = make_test_state(100);
+        let undo_before = v.history.undo_len();
+        v.reset_trim();
+        assert_eq!(v.trim_start, 0);
+        assert_eq!(v.trim_end, 99);
+        assert_eq!(v.history.undo_len(), undo_before);
     }
 
     #[test]
